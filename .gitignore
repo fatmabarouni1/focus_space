@@ -25,3 +25,5 @@ dist/
 *.log
 __pycache__/
 .vscode/
+backend/uploads/
+frontend/public/audio/
