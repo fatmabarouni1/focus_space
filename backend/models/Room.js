@@ -11,4 +11,6 @@ const roomSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
+roomSchema.index({ host_user_id: 1, createdAt: -1 }, { background: true });
+
 export default mongoose.model("Room", roomSchema);

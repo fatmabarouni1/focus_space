@@ -1,3 +1,18 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+html[dir='rtl'] body {
+  text-align: right;
+}
+
+html[dir='rtl'] input,
+html[dir='rtl'] textarea,
+html[dir='rtl'] button,
+html[dir='rtl'] [role='dialog'] {
+  direction: rtl;
+}
+
+html[dir='rtl'] .rtl-row {
+  flex-direction: row-reverse;
+}

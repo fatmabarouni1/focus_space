@@ -4,9 +4,12 @@ import RevisionModule from "../models/RevisionModule.js";
 import ModuleDocument from "../models/ModuleDocument.js";
 import ModuleNote from "../models/ModuleNote.js";
 import ModuleLink from "../models/ModuleLink.js";
+import ModuleResourceSuggestion from "../models/ModuleResourceSuggestion.js";
 import { withOwner } from "../utils/ownership.js";
 import { sendError } from "../utils/errors.js";
+import { paginateCursor } from "../utils/paginate.js";
 import { extractPdfText } from "../utils/pdfText.js";
+import logger from "../utils/logger.js";
 
 const ensureUploadsDir = () => {
   const uploadDir = path.resolve("uploads");
@@ -17,8 +20,16 @@ const ensureUploadsDir = () => {
 
 // Modules
 const listModules = async (req, res) => {
-  const modules = await RevisionModule.find({ user_id: req.user.id }).sort({ updated_at: -1 });
-  return res.json({ modules });
+  const result = await paginateCursor({
+    model: RevisionModule,
+    filter: { user_id: req.user.id },
+    limit: req.pagination?.limit,
+    cursor: req.pagination?.cursor,
+    sortField: "created_at",
+    sortOrder: -1,
+  });
+
+  return res.json(result);
 };
 
 const createModule = async (req, res) => {
@@ -93,63 +104,88 @@ const deleteModule = async (req, res) => {
 
 // Documents
 const listDocuments = async (req, res) => {
-  const documents = await ModuleDocument.find({
-    module_id: req.params.moduleId,
-    user_id: req.user.id,
-  })
-    .sort({ uploadedAt: -1 })
-    .lean();
+  const result = await paginateCursor({
+    model: ModuleDocument,
+    filter: {
+      module_id: req.params.moduleId,
+      user_id: req.user.id,
+    },
+    limit: req.pagination?.limit,
+    cursor: req.pagination?.cursor,
+    sortField: "uploadedAt",
+    sortOrder: -1,
+    transform: (doc) => ({
+      ...doc,
+      originalName: doc.originalName ?? doc.original_name,
+      uploadedAt: doc.uploadedAt ?? doc.created_at,
+    }),
+  });
 
-  const normalized = documents.map((doc) => ({
-    ...doc,
-    originalName: doc.originalName ?? doc.original_name,
-    uploadedAt: doc.uploadedAt ?? doc.created_at,
-  }));
-
-  return res.json({ documents: normalized });
+  return res.json(result);
 };
 
 const uploadDocument = async (req, res) => {
-  if (!req.file) {
-    return sendError(res, 400, "VALIDATION_ERROR", "File is required.");
+  try {
+    if (!req.file) {
+      return sendError(res, 400, "VALIDATION_ERROR", "File is required.");
+    }
+
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    let extractedText = "";
+    let extractedChars = 0;
+    let extractionError = null;
+    let extractedAt = null;
+
+    if (req.file.mimetype === "application/pdf") {
+      const filePath = req.file.path || path.resolve("uploads", req.file.filename);
+      const extracted = await extractPdfText(filePath);
+      extractedText = extracted.text;
+      extractedChars = extracted.chars;
+      extractionError = extracted.error;
+      extractedAt = new Date();
+    }
+
+    const document = await ModuleDocument.create({
+      module_id: req.params.moduleId,
+      user_id: req.user.id,
+      originalName: req.file.originalname,
+      filename: req.file.filename,
+      mime_type: req.file.mimetype,
+      size: req.file.size,
+      url: `${baseUrl}/uploads/${req.file.filename}`,
+      uploadedAt: new Date(),
+      extractedText,
+      extractedChars,
+      extractedAt,
+      extractionError,
+    });
+
+    await RevisionModule.updateOne(
+      withOwner(req, { _id: req.params.moduleId }),
+      { updated_at: new Date() }
+    );
+
+    logger.info("Document upload succeeded", {
+      event: "upload_success",
+      moduleId: req.params.moduleId,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      requestId: req.requestId,
+    });
+
+    return res.status(201).json({ message: "Document uploaded.", document });
+  } catch (error) {
+    logger.error("Document upload failed", {
+      event: "upload_failed",
+      moduleId: req.params.moduleId,
+      fileSize: req.file?.size ?? null,
+      mimeType: req.file?.mimetype ?? null,
+      requestId: req.requestId,
+      stack: error?.stack,
+      error: error?.message,
+    });
+    return sendError(res, 500, "INTERNAL_ERROR", "Unable to upload document.");
   }
-
-  const baseUrl = `${req.protocol}://${req.get("host")}`;
-  let extractedText = "";
-  let extractedChars = 0;
-  let extractionError = null;
-  let extractedAt = null;
-
-  if (req.file.mimetype === "application/pdf") {
-    const filePath = req.file.path || path.resolve("uploads", req.file.filename);
-    const extracted = await extractPdfText(filePath);
-    extractedText = extracted.text;
-    extractedChars = extracted.chars;
-    extractionError = extracted.error;
-    extractedAt = new Date();
-  }
-
-  const document = await ModuleDocument.create({
-    module_id: req.params.moduleId,
-    user_id: req.user.id,
-    originalName: req.file.originalname,
-    filename: req.file.filename,
-    mime_type: req.file.mimetype,
-    size: req.file.size,
-    url: `${baseUrl}/uploads/${req.file.filename}`,
-    uploadedAt: new Date(),
-    extractedText,
-    extractedChars,
-    extractedAt,
-    extractionError,
-  });
-
-  await RevisionModule.updateOne(
-    withOwner(req, { _id: req.params.moduleId }),
-    { updated_at: new Date() }
-  );
-
-  return res.status(201).json({ message: "Document uploaded.", document });
 };
 
 const deleteDocument = async (req, res) => {
@@ -171,12 +207,19 @@ const deleteDocument = async (req, res) => {
 
 // Notes
 const getNote = async (req, res) => {
-  const note = await ModuleNote.findOne({
-    module_id: req.params.moduleId,
-    user_id: req.user.id,
+  const result = await paginateCursor({
+    model: ModuleNote,
+    filter: {
+      module_id: req.params.moduleId,
+      user_id: req.user.id,
+    },
+    limit: req.pagination?.limit,
+    cursor: req.pagination?.cursor,
+    sortField: "updated_at",
+    sortOrder: -1,
   });
 
-  return res.json({ note });
+  return res.json(result);
 };
 
 const saveNote = async (req, res) => {
@@ -244,6 +287,22 @@ const deleteLink = async (req, res) => {
   return res.json({ message: "Link deleted." });
 };
 
+const listResources = async (req, res) => {
+  const result = await paginateCursor({
+    model: ModuleResourceSuggestion,
+    filter: {
+      moduleId: req.params.moduleId,
+      userId: req.user.id,
+    },
+    limit: req.pagination?.limit,
+    cursor: req.pagination?.cursor,
+    sortField: "createdAt",
+    sortOrder: -1,
+  });
+
+  return res.json(result);
+};
+
 export {
   ensureUploadsDir,
   listModules,
@@ -256,6 +315,7 @@ export {
   deleteDocument,
   getNote,
   saveNote,
+  listResources,
   listLinks,
   createLink,
   deleteLink,

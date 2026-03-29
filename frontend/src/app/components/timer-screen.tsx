@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Pause, RotateCcw, Settings, ArrowLeft, Volume2, VolumeX, X } from 'lucide-react';
 import { Button } from '@/app/components/ui/button';
 import { CompactMusicPlayer } from '@/app/components/compact-music-player';
@@ -19,6 +20,7 @@ interface TimerScreenProps {
 }
 
 export function TimerScreen({ onBack }: TimerScreenProps) {
+  const { t } = useTranslation();
   const {
     remainingSeconds,
     currentDurationSeconds,
@@ -38,12 +40,12 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
   useEffect(() => {
     const mins = Math.floor(remainingSeconds / 60);
     const secs = remainingSeconds % 60;
-    document.title = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')} - Focus Space`;
+    document.title = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')} - ${t('app.brand')}`;
     
     return () => {
-      document.title = 'Focus Space';
+      document.title = t('app.brand');
     };
-  }, [remainingSeconds]);
+  }, [remainingSeconds, t]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -150,7 +152,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
         <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-5">
           <Button variant="ghost" size="sm" onClick={onBack} className="rounded-full px-3">
             <ArrowLeft className="mr-2 h-4 w-4" />
-            Exit
+            {t('timer.exit')}
           </Button>
 
           <div className="flex items-center gap-2">
@@ -175,11 +177,11 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Timer Settings</DialogTitle>
+                  <DialogTitle>{t('timer.timerSettings')}</DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSettingsSave} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="focusDuration">Focus Duration (minutes)</Label>
+                    <Label htmlFor="focusDuration">{t('timer.focusDuration')}</Label>
                     <Input
                       id="focusDuration"
                       name="focusDuration"
@@ -190,7 +192,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="breakDuration">Short Break (minutes)</Label>
+                    <Label htmlFor="breakDuration">{t('timer.breakDuration')}</Label>
                     <Input
                       id="breakDuration"
                       name="breakDuration"
@@ -201,7 +203,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="longBreakDuration">Long Break (minutes)</Label>
+                    <Label htmlFor="longBreakDuration">{t('timer.longBreakDuration')}</Label>
                     <Input
                       id="longBreakDuration"
                       name="longBreakDuration"
@@ -212,7 +214,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="sessionsBeforeLongBreak">Sessions before long break</Label>
+                    <Label htmlFor="sessionsBeforeLongBreak">{t('timer.sessionsBeforeLongBreak')}</Label>
                     <Input
                       id="sessionsBeforeLongBreak"
                       name="sessionsBeforeLongBreak"
@@ -222,7 +224,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                       defaultValue={settings.sessionsBeforeLongBreak}
                     />
                   </div>
-                  <Button type="submit" className="w-full">Save Settings</Button>
+                  <Button type="submit" className="w-full">{t('timer.saveSettings')}</Button>
                 </form>
               </DialogContent>
             </Dialog>
@@ -258,7 +260,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                 transition={{ duration: 2, repeat: Infinity }}
               />
               <span className="text-base text-muted-foreground sm:text-lg">
-                {mode === 'focus' ? 'Focus Session' : 'Break Time'}
+                {mode === 'focus' ? t('timer.focusSession') : t('timer.breakTime')}
               </span>
             </motion.div>
 
@@ -348,12 +350,12 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
                 {isRunning ? (
                   <>
                     <Pause className="mr-2 h-6 w-6" />
-                    Pause
+                    {t('timer.pause')}
                   </>
                 ) : (
                   <>
                     <Play className="mr-2 h-6 w-6" />
-                    Start
+                    {t('timer.start')}
                   </>
                 )}
               </Button>
@@ -365,7 +367,7 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
 
             <div className="text-center">
               <p className="mb-2 text-sm text-muted-foreground">
-                Sessions completed today
+                {t('timer.completedSessions')}
               </p>
               <div className="flex items-center justify-center gap-2">
                 {[...Array(Math.max(4, sessionCount))].map((_, i) => (
@@ -385,8 +387,8 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
         <div className="px-6 pb-3 text-center sm:pb-6">
           <p className="text-sm text-muted-foreground">
             {mode === 'focus'
-              ? 'Stay focused and eliminate distractions'
-              : 'Take a break, you deserve it'}
+              ? t('timer.stayFocused')
+              : t('timer.takeBreak')}
           </p>
         </div>
 

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
-  BookOpenText,
   FileText,
   FileUp,
   Globe,
@@ -20,22 +19,26 @@ import {
   createLink,
   deleteDocument,
   deleteLink,
+  fetchModuleAiOutputs,
   fetchDocuments,
   fetchLinks,
   fetchModule,
   fetchNote,
+  generateModuleKeywords,
   generateModuleQuiz,
-  generateModuleResources,
   generateModuleSummary,
   saveNote,
+  saveModuleAiOutput,
+  searchModuleResources,
   uploadDocument,
   type ModuleDocument,
   type ModuleLink,
   type ModuleNote,
+  type ResourceSearchResult,
   type RevisionModule,
   type StudyCoachQuiz,
-  type StudyCoachResources,
   type StudyCoachResponse,
+  type StudyCoachKeywords,
   type StudyCoachSummary,
 } from '@/app/api/revision';
 import { BaseCard } from '@/app/components/base-card';
@@ -48,14 +51,14 @@ interface ModulePageProps {
   onBack: () => void;
 }
 
-type StudioTab = 'overview' | 'ideas' | 'quiz' | 'resources';
+type StudioTab = 'summary' | 'keywords' | 'quiz' | 'resources';
 
 const panelClassName =
   'rounded-[28px] border border-border/60 bg-background/88 shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur-xl';
 
 const studioTabs: { id: StudioTab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'ideas', label: 'Key Ideas' },
+  { id: 'summary', label: 'Summary' },
+  { id: 'keywords', label: 'Keywords' },
   { id: 'quiz', label: 'Quiz' },
   { id: 'resources', label: 'Resources' },
 ];
@@ -88,15 +91,21 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
   const [savingNote, setSavingNote] = useState(false);
   const [summaryResult, setSummaryResult] = useState<StudyCoachResponse<StudyCoachSummary> | null>(null);
   const [quizResult, setQuizResult] = useState<StudyCoachResponse<StudyCoachQuiz> | null>(null);
-  const [resourcesResult, setResourcesResult] = useState<StudyCoachResponse<StudyCoachResources> | null>(null);
+  const [keywordsResult, setKeywordsResult] = useState<StudyCoachResponse<StudyCoachKeywords> | null>(null);
+  const [resourceQuery, setResourceQuery] = useState('');
+  const [resourceResults, setResourceResults] = useState<ResourceSearchResult[]>([]);
+  const [searchedResourceQuery, setSearchedResourceQuery] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [quizLoading, setQuizLoading] = useState(false);
   const [resourcesLoading, setResourcesLoading] = useState(false);
+  const [keywordsLoading, setKeywordsLoading] = useState(false);
   const [summaryError, setSummaryError] = useState('');
   const [quizError, setQuizError] = useState('');
   const [resourcesError, setResourcesError] = useState('');
-  const [activeTab, setActiveTab] = useState<StudioTab>('overview');
+  const [keywordsError, setKeywordsError] = useState('');
+  const [activeTab, setActiveTab] = useState<StudioTab>('summary');
   const [revealedQuizAnswers, setRevealedQuizAnswers] = useState<Record<number, boolean>>({});
+  const [savingCurrentResult, setSavingCurrentResult] = useState(false);
 
   useEffect(() => {
     loadModule();
@@ -107,17 +116,26 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
     setLoading(true);
     setError('');
     try {
-      const [moduleData, docs, noteData, linksData] = await Promise.all([
+      const [aiOutputs, loadedModule, loadedDocs, loadedNote, loadedLinks] = await Promise.all([
+        fetchModuleAiOutputs(authToken, moduleId),
         fetchModule(authToken, moduleId),
         fetchDocuments(authToken, moduleId),
         fetchNote(authToken, moduleId),
         fetchLinks(authToken, moduleId),
       ]);
-      setModule(moduleData);
-      setDocuments(docs);
-      setNote(noteData);
-      setNoteContent(noteData?.content ?? '');
-      setLinks(linksData);
+      setModule(loadedModule);
+      setDocuments(loadedDocs);
+      setNote(loadedNote);
+      setNoteContent(loadedNote?.content ?? '');
+      setLinks(loadedLinks);
+      setSummaryResult(aiOutputs.summary ?? null);
+      setQuizResult(aiOutputs.quiz ?? null);
+      setKeywordsResult(aiOutputs.keywords ?? null);
+      setResourceQuery(loadedModule.title ?? '');
+      setSummaryError('');
+      setQuizError('');
+      setResourcesError('');
+      setKeywordsError('');
     } catch (err: any) {
       setError(err.message || 'Failed to load module.');
     } finally {
@@ -187,9 +205,9 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
     }
   };
 
-  const handleGenerateSummary = async (nextTab: StudioTab = 'overview') => {
+  const handleGenerateSummary = async () => {
     if (!authToken) return;
-    setActiveTab(nextTab);
+    setActiveTab('summary');
     setSummaryLoading(true);
     setSummaryError('');
     try {
@@ -207,6 +225,10 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
     setQuizLoading(true);
     setQuizError('');
     try {
+      if (!summaryResult) {
+        const generatedSummary = await generateModuleSummary(authToken, moduleId);
+        setSummaryResult(generatedSummary);
+      }
       setQuizResult(await generateModuleQuiz(authToken, moduleId));
       setRevealedQuizAnswers({});
     } catch (err: any) {
@@ -216,17 +238,78 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
     }
   };
 
-  const handleGenerateResources = async () => {
+  const handleSearchResources = async (event?: React.FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
     if (!authToken) return;
-    setActiveTab('resources');
-    setResourcesLoading(true);
-    setResourcesError('');
+    await performResourceSearch(resourceQuery);
+  };
+
+  const handleGenerateKeywords = async () => {
+    if (!authToken) return;
+    setActiveTab('keywords');
+    setKeywordsLoading(true);
+    setKeywordsError('');
     try {
-      setResourcesResult(await generateModuleResources(authToken, moduleId));
+      setKeywordsResult(await generateModuleKeywords(authToken, moduleId));
     } catch (err: any) {
-      setResourcesError(err.message || 'Failed to generate resources.');
+      setKeywordsError(err.message || 'Failed to generate keywords.');
     } finally {
-      setResourcesLoading(false);
+      setKeywordsLoading(false);
+    }
+  };
+
+  const handleOpenResources = async () => {
+    if (!authToken) return;
+    let currentSummary = summaryResult;
+    if (!currentSummary) {
+      setSummaryLoading(true);
+      setSummaryError('');
+      try {
+        currentSummary = await generateModuleSummary(authToken, moduleId);
+        setSummaryResult(currentSummary);
+      } catch (err: any) {
+        setSummaryError(err.message || 'Failed to generate summary.');
+      } finally {
+        setSummaryLoading(false);
+      }
+    }
+
+    const inferredTopic =
+      currentSummary?.output.title?.trim() ||
+      currentSummary?.output.mainIdeas?.find(Boolean) ||
+      currentSummary?.output.keyPoints?.find(Boolean) ||
+      '';
+    const currentQuery = resourceQuery.trim();
+    const titleQuery = module?.title?.trim() ?? '';
+    const queryToUse =
+      !currentQuery || currentQuery === titleQuery
+        ? inferredTopic || suggestedResourceQuery
+        : currentQuery;
+    await performResourceSearch(queryToUse);
+  };
+
+  const handleSaveCurrentResult = async () => {
+    if (!authToken) return;
+    setSavingCurrentResult(true);
+    setError('');
+    try {
+      if (activeTab === 'summary') {
+        if (!summaryResult) throw new Error('No summary to save.');
+        const saved = await saveModuleAiOutput(authToken, moduleId, 'summary', summaryResult.output);
+        setSummaryResult(saved);
+      } else if (activeTab === 'quiz') {
+        if (!quizResult) throw new Error('No quiz to save.');
+        const saved = await saveModuleAiOutput(authToken, moduleId, 'quiz', quizResult.output);
+        setQuizResult(saved);
+      } else if (activeTab === 'keywords') {
+        if (!keywordsResult) throw new Error('No keywords to save.');
+        const saved = await saveModuleAiOutput(authToken, moduleId, 'keywords', keywordsResult.output);
+        setKeywordsResult(saved);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to save current result.');
+    } finally {
+      setSavingCurrentResult(false);
     }
   };
 
@@ -245,11 +328,68 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
     ];
   }, [documents.length, links.length, noteContent]);
 
+  const suggestedResourceQuery = useMemo(() => {
+    const summaryTitle = summaryResult?.output.title?.trim() ?? '';
+    if (summaryTitle) {
+      return summaryTitle;
+    }
+
+    const mainIdeas = summaryResult?.output.mainIdeas?.filter(Boolean) ?? [];
+    if (mainIdeas.length) {
+      return mainIdeas[0];
+    }
+
+    const keyPoints = summaryResult?.output.keyPoints?.filter(Boolean) ?? [];
+    if (keyPoints.length) {
+      return keyPoints[0];
+    }
+
+    const keywords = keywordsResult?.output.keywords?.filter(Boolean).slice(0, 4) ?? [];
+    if (keywords.length) {
+      return keywords.join(' ');
+    }
+
+    const keyConcepts = summaryResult?.output.keyConcepts?.filter(Boolean) ?? [];
+    if (keyConcepts.length) {
+      return keyConcepts.slice(0, 3).join(' ');
+    }
+
+    return module?.title?.trim() ?? '';
+  }, [keywordsResult, module?.title, summaryResult]);
+
+  const performResourceSearch = async (query: string) => {
+    if (!authToken) return;
+    const trimmedQuery = query.trim();
+    setActiveTab('resources');
+    if (!trimmedQuery) {
+      setResourcesError('Generate keywords or summary first, or enter a query to search for resources.');
+      return;
+    }
+
+    setResourcesLoading(true);
+    setResourcesError('');
+    try {
+      const data = await searchModuleResources(authToken, moduleId, trimmedQuery);
+      setResourceQuery(trimmedQuery);
+      setResourceResults(data.results);
+      setSearchedResourceQuery(data.query);
+    } catch (err: any) {
+      setResourcesError(err.message || 'Failed to search resources.');
+    } finally {
+      setResourcesLoading(false);
+    }
+  };
+
   const renderStudioContent = () => {
-    if (activeTab === 'overview') {
+    if (activeTab === 'summary') {
       if (summaryLoading) return <div className="h-56 animate-pulse rounded-[28px] bg-muted/60" />;
       if (summaryError) return <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{summaryError}</div>;
       if (!summaryResult) return <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">Generate a polished overview from your sources and notes.</div>;
+      const keyIdeas = [
+        ...(summaryResult.output.mainIdeas ?? []),
+        ...(summaryResult.output.keyPoints ?? []),
+      ].map((item) => item?.trim()).filter(Boolean);
+      const uniqueKeyIdeas = [...new Set(keyIdeas)].slice(0, 8);
       return (
         <div className="space-y-4">
           <div className="rounded-[30px] border border-border/70 bg-gradient-to-br from-background to-muted/30 p-6">
@@ -259,6 +399,34 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
             </div>
             <p className="whitespace-pre-line text-[15px] leading-7 text-foreground/85">{summaryResult.output.summary}</p>
           </div>
+          {uniqueKeyIdeas.length ? (
+            <div className="rounded-[28px] border border-border/70 bg-background p-5">
+              <h3 className="mb-3 text-base font-semibold">Key Ideas</h3>
+              <div className="grid gap-3">
+                {uniqueKeyIdeas.map((item, index) => (
+                  <div key={`${item}-${index}`} className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 text-sm leading-6">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {summaryResult.output.detailedSummary ? (
+            <div className="rounded-[28px] border border-border/70 bg-background p-5">
+              <h3 className="mb-3 text-base font-semibold">Detailed Summary</h3>
+              <p className="whitespace-pre-line text-sm leading-7 text-foreground/85">{summaryResult.output.detailedSummary}</p>
+            </div>
+          ) : null}
+          {summaryResult.output.importantNotes?.length ? (
+            <div className="rounded-[28px] border border-border/70 bg-background p-5">
+              <h3 className="mb-3 text-base font-semibold">Important Notes</h3>
+              <div className="grid gap-3">
+                {summaryResult.output.importantNotes.map((item, index) => (
+                  <div key={`${item}-${index}`} className="rounded-2xl border border-border/60 bg-muted/20 px-4 py-4 text-sm leading-6">{item}</div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {summaryResult.meta ? (
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-3xl border border-border/70 bg-muted/20 px-4 py-4 text-sm">Notes: {summaryResult.meta.notesIncluded ? 'Yes' : 'No'}</div>
@@ -266,35 +434,6 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
               <div className="rounded-3xl border border-border/70 bg-muted/20 px-4 py-4 text-sm">Chars used: {summaryResult.meta.extractedChars ?? 0}</div>
             </div>
           ) : null}
-        </div>
-      );
-    }
-
-    if (activeTab === 'ideas') {
-      if (summaryLoading) return <div className="h-64 animate-pulse rounded-[28px] bg-muted/60" />;
-      if (summaryError) return <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{summaryError}</div>;
-      if (!summaryResult) return <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">Run a summary to populate key ideas and glossary terms.</div>;
-      return (
-        <div className="grid gap-4 xl:grid-cols-[1.08fr,0.92fr]">
-          <div className="rounded-[28px] border border-border/70 bg-background p-5">
-            <div className="mb-4 flex items-center gap-2"><Brain className="h-4 w-4 text-[var(--focus-primary)]" /><h3 className="text-base font-semibold">Key points</h3></div>
-            <div className="grid gap-3">
-              {summaryResult.output.keyPoints.map((point, index) => (
-                <div key={`${point}-${index}`} className="rounded-3xl border border-border/60 bg-muted/20 px-4 py-4 text-sm leading-6">{point}</div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-[28px] border border-border/70 bg-background p-5">
-            <div className="mb-4 flex items-center gap-2"><BookOpenText className="h-4 w-4 text-[var(--focus-primary)]" /><h3 className="text-base font-semibold">Glossary</h3></div>
-            <div className="space-y-3">
-              {summaryResult.output.glossary.map((item, index) => (
-                <div key={`${item.term}-${index}`} className="rounded-3xl border border-border/60 bg-muted/20 px-4 py-4">
-                  <div className="text-sm font-medium">{item.term}</div>
-                  <div className="mt-1 text-sm leading-6 text-muted-foreground">{item.definition}</div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       );
     }
@@ -345,27 +484,76 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
       );
     }
 
-    if (resourcesLoading) return <div className="h-72 animate-pulse rounded-[28px] bg-muted/60" />;
-    if (resourcesError) return <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{resourcesError}</div>;
-    if (!resourcesResult) return <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">Generate rich resource cards tailored to this module.</div>;
-    return (
-      <div className="grid gap-4 md:grid-cols-2">
-        {resourcesResult.output.recommendedResources?.length ? resourcesResult.output.recommendedResources.map((resource, index) => (
-          <div key={`${resource.title}-${index}`} className="rounded-[28px] border border-border/70 bg-background p-5 shadow-sm">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="text-base font-semibold">{resource.title}</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Pill className="bg-muted text-muted-foreground">{resource.platform}</Pill>
-                  <Pill className="bg-muted text-muted-foreground">{resource.type}</Pill>
-                  <Pill className="bg-muted text-muted-foreground">{resource.difficulty}</Pill>
-                </div>
-              </div>
-              <SecondaryButton variant="ghost" size="sm" onClick={() => window.open(resource.url, '_blank', 'noreferrer')}>Open</SecondaryButton>
-            </div>
-            <div className="text-sm leading-6 text-muted-foreground">{resource.whyThisHelps}</div>
+    if (activeTab === 'keywords') {
+      if (keywordsLoading) return <div className="h-56 animate-pulse rounded-[28px] bg-muted/60" />;
+      if (keywordsError) return <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{keywordsError}</div>;
+      if (!keywordsResult) return <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">Generate concise keywords from your notes and documents.</div>;
+      return (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            {keywordsResult.output.keywords.length > 0 ? keywordsResult.output.keywords.map((keyword, index) => (
+              <Pill key={`${keyword}-${index}`} className="bg-[var(--focus-light)] px-4 py-2 text-[var(--focus-primary)]">{keyword}</Pill>
+            )) : <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">No keywords were extracted.</div>}
           </div>
-        )) : <div className="rounded-[28px] border border-dashed border-border/70 px-6 py-10 text-center text-sm text-muted-foreground">No recommendations returned.</div>}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-[28px] border border-border/70 bg-background p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium">Automatic resource search</div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                Results are generated automatically from your keywords, summary ideas, or module title.
+              </div>
+            </div>
+            <SecondaryButton type="button" disabled>
+              Analyze with AI
+            </SecondaryButton>
+          </div>
+          {searchedResourceQuery || suggestedResourceQuery ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Pill className="bg-muted text-muted-foreground">
+                Query: {searchedResourceQuery || suggestedResourceQuery}
+              </Pill>
+            </div>
+          ) : null}
+        </div>
+
+        {resourcesLoading ? <div className="h-72 animate-pulse rounded-[28px] bg-muted/60" /> : null}
+        {resourcesError ? <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{resourcesError}</div> : null}
+        {!resourcesLoading && !resourcesError && resourceResults.length === 0 ? (
+          <div className="rounded-[28px] border border-dashed border-border/70 bg-muted/20 px-6 py-10 text-center text-sm text-muted-foreground">
+            {searchedResourceQuery ? 'No results returned for this query.' : 'Open the Resources tab after generating summary or keywords to load resource results automatically.'}
+          </div>
+        ) : null}
+
+        {resourceResults.length > 0 ? (
+          <div className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              Showing {resourceResults.length} result{resourceResults.length === 1 ? '' : 's'} for "{searchedResourceQuery}".
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {resourceResults.map((result) => (
+                <div key={`${result.position}-${result.link}`} className="rounded-[28px] border border-border/70 bg-background p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-base font-semibold">{result.title}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Pill className="bg-muted text-muted-foreground">Result {result.position}</Pill>
+                        <Pill className="bg-muted text-muted-foreground">{new URL(result.link).hostname.replace(/^www\./, '')}</Pill>
+                      </div>
+                    </div>
+                    <SecondaryButton variant="ghost" size="sm" onClick={() => window.open(result.link, '_blank', 'noreferrer')}>Open</SecondaryButton>
+                  </div>
+                  <div className="text-sm leading-6 text-muted-foreground">{result.snippet || 'No snippet available.'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -478,11 +666,10 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
                 <h2 className="mt-2 text-2xl font-semibold">Ask your material anything</h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Your current sources and notes are used as context. Launch an action below to turn them into polished study outputs.</p>
                 <div className="mt-5 flex flex-wrap gap-2">
-                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={() => handleGenerateSummary('overview')} disabled={summaryLoading}>{summaryLoading && activeTab === 'overview' ? 'Summarizing...' : 'Summarize'}</button>
-                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={() => handleGenerateSummary('ideas')} disabled={summaryLoading}>{summaryLoading && activeTab === 'ideas' ? 'Finding ideas...' : 'Find Key Points'}</button>
-                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={() => handleGenerateSummary('overview')} disabled={summaryLoading}>Explain Simply</button>
-                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleGenerateQuiz} disabled={quizLoading}>{quizLoading ? 'Generating Quiz...' : 'Generate Quiz'}</button>
-                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleGenerateResources} disabled={resourcesLoading}>{resourcesLoading ? 'Finding Resources...' : 'Generate Resources'}</button>
+                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleGenerateSummary} disabled={summaryLoading}>{summaryLoading ? 'Regenerating Summary...' : 'Regenerate Summary'}</button>
+                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleGenerateKeywords} disabled={keywordsLoading}>{keywordsLoading ? 'Finding Keywords...' : 'Generate Keywords'}</button>
+                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleGenerateQuiz} disabled={quizLoading}>{quizLoading ? 'Regenerating Quiz...' : 'Regenerate Quiz'}</button>
+                  <button type="button" className="rounded-full border border-border/70 bg-background px-4 py-2 text-sm transition-colors hover:border-[var(--focus-primary)] hover:text-[var(--focus-primary)]" onClick={handleOpenResources} disabled={resourcesLoading}>{resourcesLoading ? 'Regenerating Resources...' : 'Regenerate Resources'}</button>
                 </div>
               </div>
               <div className="rounded-[24px] border border-border/60 bg-background/72 p-4">
@@ -498,7 +685,7 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
                   </div>
                   <div className="flex items-center justify-between rounded-2xl border border-border/60 bg-muted/15 px-3 py-2 text-sm">
                     <span className="text-muted-foreground">Last action</span>
-                    <span className="font-medium">{resourcesResult ? 'Resources' : quizResult ? 'Quiz' : summaryResult ? 'Summary' : 'None'}</span>
+                    <span className="font-medium">{resourceResults.length > 0 ? 'Resources' : quizResult ? 'Quiz' : keywordsResult ? 'Keywords' : summaryResult ? 'Summary' : 'None'}</span>
                   </div>
                 </div>
               </div>
@@ -507,9 +694,9 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
 
           <BaseCard className={`${panelClassName} p-4 sm:p-5`}>
             <div className="flex flex-wrap gap-2">
-              {studioTabs.map((tab) => (
-                <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} className={`rounded-full px-4 py-2 text-sm transition-all ${activeTab === tab.id ? 'bg-[var(--focus-primary)] text-white shadow-sm' : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'}`}>{tab.label}</button>
-              ))}
+                {studioTabs.map((tab) => (
+                  <button key={tab.id} type="button" onClick={() => (tab.id === 'resources' ? handleOpenResources() : setActiveTab(tab.id))} className={`rounded-full px-4 py-2 text-sm transition-all ${activeTab === tab.id ? 'bg-[var(--focus-primary)] text-white shadow-sm' : 'bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground'}`}>{tab.label}</button>
+                ))}
             </div>
           </BaseCard>
 
@@ -517,11 +704,24 @@ export function ModulePage({ authToken, moduleId, onBack }: ModulePageProps) {
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Main workspace</div>
-                <h3 className="mt-1 text-xl font-semibold">{activeTab === 'overview' ? 'Module overview' : activeTab === 'ideas' ? 'Key ideas' : activeTab === 'quiz' ? 'Interactive quiz' : 'Curated resources'}</h3>
+                <h3 className="mt-1 text-xl font-semibold">{activeTab === 'summary' ? 'Summary' : activeTab === 'keywords' ? 'Keywords' : activeTab === 'quiz' ? 'Interactive quiz' : 'Curated resources'}</h3>
               </div>
-              {activeTab === 'overview' && summaryResult?.cached ? <Pill className="bg-muted text-muted-foreground">Generated today</Pill> : null}
-              {activeTab === 'quiz' && quizResult?.cached ? <Pill className="bg-muted text-muted-foreground">Generated today</Pill> : null}
-              {activeTab === 'resources' && resourcesResult?.cached ? <Pill className="bg-muted text-muted-foreground">Generated today</Pill> : null}
+              <div className="flex items-center gap-2">
+                {activeTab === 'summary' && summaryResult?.cached ? <Pill className="bg-muted text-muted-foreground">Loaded from saved content</Pill> : null}
+                {activeTab === 'quiz' && quizResult?.cached ? <Pill className="bg-muted text-muted-foreground">Generated today</Pill> : null}
+                {activeTab === 'resources' ? (
+                  <SecondaryButton size="sm" onClick={handleOpenResources} disabled={resourcesLoading}>
+                    {resourcesLoading ? 'Regenerating...' : 'Regenerate Resources'}
+                  </SecondaryButton>
+                ) : null}
+                {(activeTab === 'summary' && summaryResult) ||
+                (activeTab === 'quiz' && quizResult) ||
+                (activeTab === 'keywords' && keywordsResult) ? (
+                  <SecondaryButton size="sm" onClick={handleSaveCurrentResult} disabled={savingCurrentResult}>
+                    {savingCurrentResult ? 'Saving...' : 'Save'}
+                  </SecondaryButton>
+                ) : null}
+              </div>
             </div>
             {renderStudioContent()}
           </BaseCard>

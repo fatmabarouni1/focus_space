@@ -3,16 +3,16 @@ import ModuleNote from "../models/ModuleNote.js";
 import ModuleLink from "../models/ModuleLink.js";
 import ModuleDocument from "../models/ModuleDocument.js";
 import ModuleAIOutput from "../models/ModuleAIOutput.js";
+import { llm } from "../services/llm.js";
+import logger from "../utils/logger.js";
 import { sendError } from "../utils/errors.js";
 import { extractPdfText } from "../utils/pdfText.js";
 import path from "path";
 
 const NOTES_MAX_CHARS = 4000;
 const PDF_MAX_CHARS = 8000;
-const CACHE_HOURS = 24;
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || "").replace(/\/$/, "");
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "";
-const isProduction = process.env.NODE_ENV === "production";
+const SUMMARY_NOTES_MAX_CHARS = 8000;
+const SUMMARY_PDF_MAX_CHARS = 20000;
 
 const truncateText = (value, maxChars) => {
   if (!value) return "";
@@ -20,89 +20,7 @@ const truncateText = (value, maxChars) => {
   return `${value.slice(0, maxChars)}...`;
 };
 
-const buildContextSnapshot = (module, note, links, documents, pdfText) => ({
-  moduleTitle: module.title || "",
-  notesText: truncateText(note?.content ?? "", NOTES_MAX_CHARS),
-  links: links.map((link) => ({
-    title: link.title || "",
-    url: link.url || "",
-  })),
-  pdfText,
-});
-
-const loadModuleContext = async (req) => {
-  const module = await RevisionModule.findOne({
-    _id: req.params.moduleId,
-    user_id: req.user.id,
-  });
-
-  if (!module) {
-    return { module: null };
-  }
-
-  const [note, links, documents] = await Promise.all([
-    ModuleNote.findOne({ module_id: module._id, user_id: req.user.id }),
-    ModuleLink.find({ module_id: module._id, user_id: req.user.id }).sort({
-      created_at: -1,
-    }),
-    ModuleDocument.find({ module_id: module._id, user_id: req.user.id }).sort({
-      uploadedAt: -1,
-    }),
-  ]);
-
-  let pdfTextChunks = [];
-  let extractedChars = 0;
-  let pdfTextIncluded = false;
-  let pdfExtractionWarning = false;
-
-  for (const doc of documents) {
-    const isPdf = doc.mime_type === "application/pdf";
-    if (!isPdf) continue;
-
-    if (!doc.extractedAt) {
-      const filePath = path.resolve("uploads", doc.filename);
-      const extracted = await extractPdfText(filePath);
-      doc.extractedText = extracted.text;
-      doc.extractedChars = extracted.chars;
-      doc.extractedAt = new Date();
-      doc.extractionError = extracted.error;
-      await doc.save();
-    }
-
-    if (doc.extractedText) {
-      pdfTextChunks.push(doc.extractedText);
-      extractedChars += doc.extractedText.length;
-      pdfTextIncluded = true;
-    } else {
-      pdfExtractionWarning = true;
-    }
-  }
-
-  const pdfText = truncateText(pdfTextChunks.join("\n\n"), PDF_MAX_CHARS);
-  const snapshot = buildContextSnapshot(module, note, links, documents, pdfText);
-  const notesIncluded = Boolean(snapshot.notesText && snapshot.notesText.trim());
-
-  return {
-    module,
-    snapshot,
-    meta: {
-      notesIncluded,
-      pdfTextIncluded,
-      extractedChars,
-      pdfExtractionWarning,
-    },
-  };
-};
-
-const getRecentCache = async (userId, moduleId, type) => {
-  const since = new Date(Date.now() - CACHE_HOURS * 60 * 60 * 1000);
-  return ModuleAIOutput.findOne({
-    userId,
-    moduleId,
-    type,
-    createdAt: { $gte: since },
-  }).sort({ createdAt: -1 });
-};
+const toCleanString = (value) => String(value ?? "").trim();
 
 const tryParseJson = (value) => {
   try {
@@ -112,20 +30,8 @@ const tryParseJson = (value) => {
   }
 };
 
-const logSummaryJsonFailure = (stage, raw) => {
-  if (isProduction) {
-    return;
-  }
-
-  console.warn(`[SUMMARY_DEBUG] Ollama returned invalid JSON during ${stage}.`);
-  console.warn(raw?.slice(0, 2000) || "<empty>");
-};
-
-const toCleanString = (value) => String(value ?? "").trim();
-
 const normalizeDefinitionItem = (item) => {
   if (!item) return null;
-
   if (typeof item === "string") {
     const [term, ...rest] = item.split(":");
     return {
@@ -133,344 +39,246 @@ const normalizeDefinitionItem = (item) => {
       definition: toCleanString(rest.join(":")) || item.trim(),
     };
   }
-
   const term = toCleanString(item.term);
   const definition = toCleanString(item.definition);
-
-  if (!term && !definition) {
-    return null;
-  }
-
-  return {
-    term: term || "Term",
-    definition: definition || "Definition not clearly stated.",
-  };
+  if (!term && !definition) return null;
+  return { term: term || "Term", definition: definition || "Definition not clearly stated." };
 };
 
 const normalizeSummaryOutput = (output, snapshot) => {
   const raw = output && typeof output === "object" ? output : {};
-  const title = toCleanString(raw.title) || toCleanString(snapshot.moduleTitle) || "Study Summary";
-  const keyConcepts = Array.isArray(raw.keyConcepts)
-    ? raw.keyConcepts.map((item) => toCleanString(item)).filter(Boolean)
-    : [];
-  const mainIdeas = Array.isArray(raw.mainIdeas)
-    ? raw.mainIdeas.map((item) => toCleanString(item)).filter(Boolean)
-    : [];
-  const importantDefinitions = Array.isArray(raw.importantDefinitions)
-    ? raw.importantDefinitions.map(normalizeDefinitionItem).filter(Boolean)
-    : [];
-  const keyTakeaways = Array.isArray(raw.keyTakeaways)
-    ? raw.keyTakeaways.map((item) => toCleanString(item)).filter(Boolean)
-    : [];
-
-  const summary =
-    toCleanString(raw.summary) ||
-    [
-      `Title: ${title}`,
-      "",
-      "Main Ideas:",
-      ...(mainIdeas.length > 0
-        ? mainIdeas.map((item) => `- ${item}`)
-        : ["- No strong main ideas could be extracted."]),
-      "",
-      "Key Takeaways:",
-      ...(keyTakeaways.length > 0
-        ? keyTakeaways.map((item) => `- ${item}`)
-        : ["- Review the source material again for the core ideas."]),
-    ].join("\n");
-
+  const keyConcepts = Array.isArray(raw.keyConcepts) ? raw.keyConcepts.map(toCleanString).filter(Boolean) : [];
+  const mainIdeas = Array.isArray(raw.mainIdeas) ? raw.mainIdeas.map(toCleanString).filter(Boolean) : [];
+  const importantDefinitions = Array.isArray(raw.importantDefinitions) ? raw.importantDefinitions.map(normalizeDefinitionItem).filter(Boolean) : [];
+  const keyTakeaways = Array.isArray(raw.keyTakeaways) ? raw.keyTakeaways.map(toCleanString).filter(Boolean) : [];
+  const importantNotes = Array.isArray(raw.importantNotes) ? raw.importantNotes.map(toCleanString).filter(Boolean) : [];
+  const summary = toCleanString(raw.summary) || toCleanString(raw.detailedSummary);
   return {
-    title,
-    summary,
+    title: toCleanString(raw.title) || snapshot.moduleTitle || "Study Summary",
+    summary: summary || "No summary could be generated.",
+    detailedSummary: toCleanString(raw.detailedSummary) || summary || "No detailed summary could be generated.",
     keyConcepts,
     mainIdeas,
     importantDefinitions,
     keyTakeaways,
-    keyPoints:
-      keyConcepts.length > 0
-        ? keyConcepts
-        : keyTakeaways.length > 0
-          ? keyTakeaways
-          : ["No key concepts were clearly identified."],
-    glossary:
-      importantDefinitions.length > 0
-        ? importantDefinitions
-        : [{ term: "None", definition: "None clearly stated in the notes." }],
+    importantNotes,
+    keyPoints: keyConcepts.length ? keyConcepts : importantNotes.length ? importantNotes : keyTakeaways.length ? keyTakeaways : ["No key concepts were clearly identified."],
+    glossary: importantDefinitions.length ? importantDefinitions : [{ term: "None", definition: "None clearly stated in the notes." }],
   };
 };
 
-const requestOllamaJson = async (prompt) => {
-  if (!OLLAMA_BASE_URL || !OLLAMA_MODEL) {
-    return null;
-  }
-
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      options: { temperature: 0.4 },
-    }),
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = await response.json();
-  const raw = data?.response;
-  if (!raw) return null;
-  return raw.trim();
+const normalizeKeywordsOutput = (output, snapshot) => {
+  const raw = output && typeof output === "object" ? output : {};
+  const keywords = Array.isArray(raw.keywords) ? raw.keywords.map(toCleanString).filter(Boolean) : [];
+  return {
+    title: toCleanString(raw.title) || snapshot.moduleTitle || "Study Keywords",
+    keywords: [...new Set(keywords)].slice(0, 12),
+  };
 };
 
-const buildPrompt = (type, snapshot, schema) => {
-  if (type === "summary") {
-    return [
-      "You are a study assistant.",
-      "Your task is to transform messy notes and noisy PDF text into a clean revision summary.",
-      "Rules:",
-      "- Do not repeat the raw input.",
-      "- Ignore dates, headers, duplicated text, and formatting noise.",
-      "- Reconstruct broken words when possible.",
-      "- Write the result as if preparing revision notes for a student.",
-      "- Keep only the useful academic content.",
-      "- If the text is noisy, infer the most likely meaning from the context.",
-      "- Use only information supported by the notes or PDF text.",
-      "- Keep the summary clear, compact, and easy to revise before an exam.",
-      "- Return only valid JSON with no markdown.",
-      `Schema: ${schema}`,
-      "Input:",
-      "Notes:",
-      snapshot.notesText || "N/A",
-      "",
-      "PDF text:",
-      snapshot.pdfText || "N/A",
-    ].join("\n");
-  }
-
-  return [
-    "You are a study coach. Return ONLY valid JSON with no markdown.",
-    `Schema: ${schema}`,
-    `Module title (metadata only): ${snapshot.moduleTitle}`,
-    "Use ONLY the provided sources. Do NOT assume content from the title alone.",
-    `SOURCE NOTES: ${snapshot.notesText || "N/A"}`,
-    `SOURCE PDF TEXT: ${snapshot.pdfText || "N/A"}`,
-    `Links (optional context): ${
-      snapshot.links.map((link) => `${link.title} - ${link.url}`).join(" | ") ||
-      "N/A"
-    }`,
-    `Task: Generate a ${type} response that matches the schema exactly.`,
-  ].join("\n");
+const normalizeQuizOutput = (output) => {
+  const raw = output && typeof output === "object" ? output : {};
+  const questions = Array.isArray(raw.questions) ? raw.questions : [];
+  return {
+    questions: questions.map((item) => {
+      const type = item?.type === "short" ? "short" : "mcq";
+      const question = toCleanString(item?.question);
+      const explanation = toCleanString(item?.explanation);
+      if (!question) return null;
+      if (type === "short") {
+        const answer = toCleanString(item?.answer);
+        if (!answer) return null;
+        return { type, question, answer, explanation };
+      }
+      const choices = Array.isArray(item?.choices) ? item.choices.map(toCleanString).filter(Boolean).slice(0, 4) : [];
+      const answerIndex = Number.isInteger(item?.answerIndex) ? item.answerIndex : 0;
+      if (choices.length !== 4 || answerIndex < 0 || answerIndex > 3) return null;
+      return { type: "mcq", question, choices, answerIndex, explanation };
+    }).filter(Boolean),
+  };
 };
 
-const getSchemaForType = (type) => {
+const normalizeStoredSummaryOutput = (output, snapshot) =>
+  normalizeSummaryOutput(output && typeof output === "object" ? output : {}, snapshot);
+
+const inferTopicFromSummary = (summaryOutput, snapshot) => {
+  const title = toCleanString(summaryOutput?.title);
+  if (title) return title;
+  const mainIdea = Array.isArray(summaryOutput?.mainIdeas)
+    ? summaryOutput.mainIdeas.map(toCleanString).find(Boolean)
+    : "";
+  if (mainIdea) return mainIdea;
+  const keyConcept = Array.isArray(summaryOutput?.keyConcepts)
+    ? summaryOutput.keyConcepts.map(toCleanString).find(Boolean)
+    : "";
+  if (keyConcept) return keyConcept;
+  return snapshot.moduleTitle || "Study Topic";
+};
+
+const getSnapshotLimitsForType = (type) =>
+  type === "summary"
+    ? { notesMaxChars: SUMMARY_NOTES_MAX_CHARS, pdfMaxChars: SUMMARY_PDF_MAX_CHARS }
+    : { notesMaxChars: NOTES_MAX_CHARS, pdfMaxChars: PDF_MAX_CHARS };
+
+const buildContextSnapshot = (module, note, links, pdfText, limits = {}) => ({
+  moduleTitle: module.title || "",
+  notesText: truncateText(note?.content ?? "", limits.notesMaxChars ?? NOTES_MAX_CHARS),
+  links: links.map((link) => ({ title: link.title || "", url: link.url || "" })),
+  pdfText: truncateText(pdfText, limits.pdfMaxChars ?? PDF_MAX_CHARS),
+});
+
+const loadModuleContext = async (req) => {
+  const module = await RevisionModule.findOne({ _id: req.params.moduleId, user_id: req.user.id });
+  if (!module) return { module: null };
+
+  const [note, links, documents] = await Promise.all([
+    ModuleNote.findOne({ module_id: module._id, user_id: req.user.id }),
+    ModuleLink.find({ module_id: module._id, user_id: req.user.id }).sort({ created_at: -1 }),
+    ModuleDocument.find({ module_id: module._id, user_id: req.user.id }).sort({ uploadedAt: -1 }),
+  ]);
+
+  const pdfTextChunks = [];
+  let extractedChars = 0;
+  let pdfTextIncluded = false;
+  let pdfExtractionWarning = false;
+
+  for (const doc of documents) {
+    if (doc.mime_type !== "application/pdf") continue;
+    if (!doc.extractedAt) {
+      const filePath = path.resolve("uploads", doc.filename);
+      const extracted = await extractPdfText(filePath);
+      doc.extractedText = extracted.text;
+      doc.extractedChars = extracted.chars;
+      doc.extractedAt = new Date();
+      doc.extractionError = extracted.error;
+      await doc.save();
+    }
+    if (doc.extractedText) {
+      pdfTextChunks.push(doc.extractedText);
+      extractedChars += doc.extractedText.length;
+      pdfTextIncluded = true;
+    } else {
+      pdfExtractionWarning = true;
+    }
+  }
+
+  return {
+    module,
+    note,
+    links,
+    rawPdfText: pdfTextChunks.join("\n\n"),
+    meta: {
+      notesIncluded: Boolean((note?.content || "").trim()),
+      pdfTextIncluded,
+      extractedChars,
+      pdfExtractionWarning,
+    },
+  };
+};
+
+const getLatestOutputsByModule = async (userId, moduleId) => {
+  const items = await ModuleAIOutput.find({ userId, moduleId }).sort({ isSaved: -1, createdAt: -1 });
+  return items.reduce((acc, item) => {
+    if (!acc[item.type]) {
+      acc[item.type] = {
+        cached: true,
+        output: item.outputJson,
+        createdAt: item.createdAt,
+        isSaved: Boolean(item.isSaved),
+      };
+    }
+    return acc;
+  }, {});
+};
+
+const buildPrompt = (type, snapshot, topicContext = null) => {
   if (type === "summary") {
-    return `{
-  "title": "detected topic",
-  "summary": "short structured overview for quick review",
-  "keyConcepts": ["...","...","...","..."],
-  "mainIdeas": ["short explanation","short explanation","short explanation"],
-  "importantDefinitions": [{"term":"","definition":""}],
-  "keyTakeaways": ["...","...","..."],
-  "keyPoints": ["...","...","...","..."],
-  "glossary": [{"term":"","definition":""}]
-}`;
+    return `Return only valid JSON with keys title, summary, detailedSummary, mainIdeas, keyConcepts, importantDefinitions, keyTakeaways, importantNotes, keyPoints, glossary.\nNotes:\n${snapshot.notesText || "N/A"}\n\nPDF text:\n${snapshot.pdfText || "N/A"}`;
+  }
+  if (type === "keywords") {
+    return `Return only valid JSON with keys title and keywords. Provide 8 to 15 relevant keywords.\nNotes:\n${snapshot.notesText || "N/A"}\n\nPDF text:\n${snapshot.pdfText || "N/A"}`;
+  }
+  return `Return only valid JSON with key questions. Provide 4 to 5 questions; MCQs must have 4 choices. Build the quiz primarily from the summary and inferred topic. Use notes and PDF text only to sharpen accuracy, not to change the main topic. Every question must clearly reflect the summary's main ideas, concepts, or takeaways.\nInferred topic:\n${topicContext?.topic || snapshot.moduleTitle || "Study Topic"}\n\nSummary:\n${topicContext?.summaryText || "N/A"}\n\nNotes:\n${snapshot.notesText || "N/A"}\n\nPDF text:\n${snapshot.pdfText || "N/A"}`;
+};
+
+const generateWithOllama = async (type, snapshot, topicContext = null) => {
+  let raw = null;
+  try {
+    raw = await llm.generateText(buildPrompt(type, snapshot, topicContext));
+  } catch {
+    raw = null;
+  }
+  const parsed = raw ? tryParseJson(raw) : null;
+  if (!parsed) return null;
+  if (type === "summary") return normalizeSummaryOutput(parsed, snapshot);
+  if (type === "keywords") return normalizeKeywordsOutput(parsed, snapshot);
+  const quiz = normalizeQuizOutput(parsed);
+  return quiz.questions.length >= 4 && quiz.questions.length <= 5 ? quiz : null;
+};
+
+const buildFallback = (type, snapshot, topicContext = null) => {
+  if (type === "keywords") {
+    const words = [...new Set(`${snapshot.moduleTitle} ${snapshot.notesText} ${snapshot.pdfText}`.split(/[\s,.;:!?()[\]{}"'`]+/).map((x) => x.trim()).filter((x) => x.length >= 4 && x.length <= 24))].slice(0, 10);
+    return { title: snapshot.moduleTitle || "Study Keywords", keywords: words };
   }
   if (type === "quiz") {
-    return `{
-  "questions": [
-    { "type":"mcq", "question":"", "choices":["A","B","C","D"], "answerIndex":0, "explanation":"" },
-    { "type":"short", "question":"", "answer":"", "explanation":"" }
-  ]
-}`;
-  }
-  return `{
-  "recommendedResources": [
-    { "title":"", "type":"video|course|article|documentation", "platform":"", "url":"", "whyThisHelps":"", "difficulty":"beginner|intermediate|advanced" }
-  ]
-}`;
-};
-
-const generateWithOllama = async (type, snapshot) => {
-  const schema = getSchemaForType(type);
-  const prompt = buildPrompt(type, snapshot, schema);
-
-  const raw = await requestOllamaJson(prompt);
-  if (!raw) return null;
-
-  let parsed = tryParseJson(raw);
-  if (parsed) {
-    if (type === "summary") {
-      return normalizeSummaryOutput(parsed, snapshot);
-    }
-    return parsed;
-  }
-
-  if (type === "summary") {
-    logSummaryJsonFailure("initial parse", raw);
-  }
-
-  const retryPrompt = [
-    "Fix the output to match the schema and return ONLY valid JSON.",
-    `Schema: ${schema}`,
-    `Invalid JSON: ${raw}`,
-  ].join("\n");
-  const retryRaw = await requestOllamaJson(retryPrompt);
-  if (!retryRaw) return null;
-  parsed = tryParseJson(retryRaw);
-  if (!parsed) {
-    if (type === "summary") {
-      logSummaryJsonFailure("retry parse", retryRaw);
-    }
-    return null;
-  }
-
-  if (type === "summary") {
-    return normalizeSummaryOutput(parsed, snapshot);
-  }
-
-  return parsed;
-};
-
-const buildTemplateSummary = (snapshot) => {
-  const notesSnippet = snapshot.notesText
-    ? snapshot.notesText.slice(0, 400)
-    : "";
-  const pdfSnippet = snapshot.pdfText ? snapshot.pdfText.slice(0, 400) : "";
-
-  return normalizeSummaryOutput(
-    {
-      title: snapshot.moduleTitle || "Study Summary",
-      keyConcepts: [
-        snapshot.notesText ? "Core ideas from notes" : "",
-        snapshot.pdfText ? "Supporting concepts from PDF text" : "",
-        snapshot.links.length ? "Supplementary linked resources" : "",
-      ].filter(Boolean),
-      mainIdeas: [
-        notesSnippet
-          ? `Notes suggest: ${notesSnippet}${notesSnippet.length >= 400 ? "..." : ""}`
-          : "No notes were provided for this module.",
-        pdfSnippet
-          ? `PDF highlights: ${pdfSnippet}${pdfSnippet.length >= 400 ? "..." : ""}`
-          : "No PDF text was available to summarize.",
+    const focus = topicContext?.topic || snapshot.moduleTitle || "this module";
+    const takeaway =
+      toCleanString(topicContext?.summaryOutput?.keyTakeaways?.[0]) ||
+      toCleanString(topicContext?.summaryOutput?.mainIdeas?.[0]) ||
+      "One central idea from the summary.";
+    return {
+      questions: [
+        { type: "mcq", question: `According to the summary, what is the main focus of ${focus}?`, choices: ["The core topic described in the summary", "An unrelated topic", "Only trivia", "No topic"], answerIndex: 0, explanation: "The quiz should stay aligned with the summary topic." },
+        { type: "mcq", question: "Which kind of information should you remember first from the summary?", choices: ["Key concepts and takeaways", "Only formatting details", "Only page count", "Nothing important"], answerIndex: 0, explanation: "The summary should drive the most important revision points." },
+        { type: "mcq", question: `Which statement best matches the summary of ${focus}?`, choices: [takeaway, "A random unrelated detail", "A formatting instruction", "No meaningful idea"], answerIndex: 0, explanation: "This option reflects the summary takeaway." },
+        { type: "short", question: "State one important takeaway from the summary.", answer: takeaway, explanation: "This checks whether the learner retained a summary-based idea." },
       ],
-      importantDefinitions: [],
-      keyTakeaways: [
-        "Focus revision on the repeated concepts across notes and PDFs.",
-        snapshot.links.length
-          ? "Use the saved links to deepen understanding after reviewing the basics."
-          : "Add curated links if you want more external explanations.",
-      ],
-    },
-    snapshot
-  );
+    };
+  }
+  return normalizeSummaryOutput({ title: snapshot.moduleTitle, summary: snapshot.pdfText || snapshot.notesText || "No summary available." }, snapshot);
 };
 
-const buildTemplateQuiz = (snapshot) => {
-  const topic = snapshot.moduleTitle || "this module";
+const getTopicContext = async (userId, moduleId, summarySnapshot) => {
+  const latestSummary = await ModuleAIOutput.findOne({
+    userId,
+    moduleId,
+    type: "summary",
+  }).sort({ isSaved: -1, createdAt: -1 });
+
+  const summaryOutput = latestSummary?.outputJson
+    ? normalizeStoredSummaryOutput(latestSummary.outputJson, summarySnapshot)
+    : await generateWithOllama("summary", summarySnapshot) || buildFallback("summary", summarySnapshot);
+
   return {
-    questions: [
-      {
-        type: "mcq",
-        question: `What is the primary focus of ${topic}?`,
-        choices: ["Overview concepts", "Only trivia", "Unrelated topic", "None"],
-        answerIndex: 0,
-        explanation: "The module centers on core concepts and summaries.",
-      },
-      {
-        type: "mcq",
-        question: "Which item best supports revision?",
-        choices: [
-          "Key points and summaries",
-          "Random unrelated links",
-          "Skipping notes",
-          "No materials",
-        ],
-        answerIndex: 0,
-        explanation: "Key points and summaries help quick review.",
-      },
-      {
-        type: "mcq",
-        question: "How many resources should you aim to add?",
-        choices: ["At least one useful resource", "Zero always", "Hundreds", "None"],
-        answerIndex: 0,
-        explanation: "A small curated set is most helpful.",
-      },
-      {
-        type: "short",
-        question: `Summarize the most important takeaway from ${topic}.`,
-        answer: "A concise summary of the main idea.",
-        explanation: "Focus on the core theme and outcomes.",
-      },
-    ],
+    topic: inferTopicFromSummary(summaryOutput, summarySnapshot),
+    summaryText: toCleanString(summaryOutput?.detailedSummary) || toCleanString(summaryOutput?.summary),
+    summaryOutput,
   };
-};
-
-const buildTemplateResources = (snapshot) => {
-  const resources = snapshot.links.length
-    ? snapshot.links.slice(0, 3).map((link) => ({
-        title: link.title || "Saved resource",
-        type: "article",
-        platform: "Saved Link",
-        url: link.url,
-        whyThisHelps: "Already curated for this module.",
-        difficulty: "beginner",
-      }))
-    : [
-        {
-          title: `${snapshot.moduleTitle || "Module"} - Official documentation`,
-          type: "documentation",
-          platform: "Docs",
-          url: "https://example.com",
-          whyThisHelps: "Provides authoritative reference material.",
-          difficulty: "beginner",
-        },
-        {
-          title: `${snapshot.moduleTitle || "Module"} overview video`,
-          type: "video",
-          platform: "YouTube",
-          url: "https://youtube.com",
-          whyThisHelps: "Quick visual walkthrough of key ideas.",
-          difficulty: "beginner",
-        },
-      ];
-
-  return { recommendedResources: resources };
-};
-
-const buildTemplateOutput = (type, snapshot) => {
-  if (type === "summary") return buildTemplateSummary(snapshot);
-  if (type === "quiz") return buildTemplateQuiz(snapshot);
-  return buildTemplateResources(snapshot);
 };
 
 const handleAiRequest = (type) => async (req, res) => {
+  const startedAt = Date.now();
   try {
-    const { module, snapshot, meta } = await loadModuleContext(req);
-    if (!module) {
-      return sendError(res, 404, "NOT_FOUND", "Module not found.");
-    }
-
-    const cached =
-      type === "summary"
-        ? null
-        : await getRecentCache(req.user.id, module._id, type);
-    if (cached) {
-      return res.json({
-        cached: true,
-        output: cached.outputJson,
-        createdAt: cached.createdAt,
-        meta: type === "summary" ? meta : undefined,
-      });
-    }
-
-    let output = await generateWithOllama(type, snapshot);
-    if (!output) {
-      output = buildTemplateOutput(type, snapshot);
-    }
-
+    logger.info("AI generation started", {
+      event: "ai_generation_start",
+      feature: type,
+      moduleId: req.params.moduleId,
+      requestId: req.requestId,
+    });
+    const { module, note, links, rawPdfText, meta } = await loadModuleContext(req);
+    if (!module) return sendError(res, 404, "NOT_FOUND", "Module not found.");
+    const snapshot = buildContextSnapshot(module, note, links, rawPdfText, getSnapshotLimitsForType(type));
+    const topicContext =
+      type === "quiz"
+        ? await getTopicContext(
+            req.user.id,
+            module._id,
+            buildContextSnapshot(module, note, links, rawPdfText, getSnapshotLimitsForType("summary"))
+          )
+        : null;
+    let output = await generateWithOllama(type, snapshot, topicContext);
+    if (!output) output = buildFallback(type, snapshot, topicContext);
     const created = await ModuleAIOutput.create({
       userId: req.user.id,
       moduleId: module._id,
@@ -478,20 +286,64 @@ const handleAiRequest = (type) => async (req, res) => {
       inputSnapshot: snapshot,
       outputJson: output,
     });
-
-    return res.json({
-      cached: false,
-      output: created.outputJson,
-      createdAt: created.createdAt,
-      meta: type === "summary" ? meta : undefined,
+    logger.info("AI generation completed", {
+      event: "ai_generation_complete",
+      feature: type,
+      moduleId: module._id.toString(),
+      durationMs: Date.now() - startedAt,
+      requestId: req.requestId,
     });
+    return res.json({ cached: false, output: created.outputJson, createdAt: created.createdAt, meta: type === "summary" ? meta : undefined });
   } catch (error) {
+    logger.error("AI generation failed", {
+      event: "ai_generation_failed",
+      feature: type,
+      moduleId: req.params.moduleId,
+      durationMs: Date.now() - startedAt,
+      requestId: req.requestId,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Failed to generate AI output.");
+  }
+};
+
+const getModuleAiOutputs = async (req, res) => {
+  try {
+    const module = await RevisionModule.findOne({ _id: req.params.moduleId, user_id: req.user.id });
+    if (!module) return sendError(res, 404, "NOT_FOUND", "Module not found.");
+    const outputs = await getLatestOutputsByModule(req.user.id, module._id);
+    return res.json({ outputs });
+  } catch {
+    return sendError(res, 500, "INTERNAL_ERROR", "Failed to load AI outputs.");
+  }
+};
+
+const saveModuleAiOutput = async (req, res) => {
+  try {
+    const module = await RevisionModule.findOne({ _id: req.params.moduleId, user_id: req.user.id });
+    if (!module) return sendError(res, 404, "NOT_FOUND", "Module not found.");
+    const { type, output } = req.body || {};
+    if (!type || !["summary", "quiz", "resources", "keywords"].includes(type)) return sendError(res, 400, "VALIDATION_ERROR", "Invalid AI output type.");
+    if (!output || typeof output !== "object") return sendError(res, 400, "VALIDATION_ERROR", "Output payload is required.");
+    await ModuleAIOutput.updateMany({ userId: req.user.id, moduleId: module._id, type }, { $set: { isSaved: false } });
+    const created = await ModuleAIOutput.create({
+      userId: req.user.id,
+      moduleId: module._id,
+      type,
+      inputSnapshot: { moduleTitle: module.title || "" },
+      outputJson: output,
+      isSaved: true,
+    });
+    return res.json({ saved: true, output: created.outputJson, createdAt: created.createdAt, isSaved: true });
+  } catch {
+    return sendError(res, 500, "INTERNAL_ERROR", "Failed to save AI output.");
   }
 };
 
 const generateSummary = handleAiRequest("summary");
 const generateQuiz = handleAiRequest("quiz");
 const generateResources = handleAiRequest("resources");
+const generateKeywords = handleAiRequest("keywords");
 
-export { generateSummary, generateQuiz, generateResources };
+export { generateSummary, generateQuiz, generateResources, generateKeywords, getModuleAiOutputs, saveModuleAiOutput };

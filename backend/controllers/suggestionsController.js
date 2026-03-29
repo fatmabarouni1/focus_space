@@ -1,8 +1,9 @@
 import Suggestion from "../models/Suggestion.js";
 import { withOwner } from "../utils/ownership.js";
-import { sendError } from "../utils/errors.js";
+import catchAsync from "../utils/catchAsync.js";
+import { AppError } from "../utils/errors.js";
 
-const listSuggestions = async (req, res) => {
+const listSuggestions = catchAsync(async (req, res) => {
   const { moduleId } = req.query;
   const filter = { userId: req.user.id };
   if (moduleId) {
@@ -11,13 +12,13 @@ const listSuggestions = async (req, res) => {
 
   const suggestions = await Suggestion.find(filter).sort({ createdAt: -1 });
   return res.json({ suggestions });
-};
+});
 
-const createSuggestion = async (req, res) => {
+const createSuggestion = catchAsync(async (req, res) => {
   const { title, description, level, moduleId, source } = req.body;
 
   if (!title || !title.trim()) {
-    return sendError(res, 400, "VALIDATION_ERROR", "Title is required.");
+    throw new AppError("Title is required.", 400);
   }
 
   const suggestion = await Suggestion.create({
@@ -30,18 +31,18 @@ const createSuggestion = async (req, res) => {
   });
 
   return res.status(201).json({ suggestion });
-};
+});
 
-const deleteSuggestion = async (req, res) => {
+const deleteSuggestion = catchAsync(async (req, res) => {
   const suggestion = await Suggestion.findOneAndDelete(
     withOwner(req, { _id: req.params.id }, "userId")
   );
 
   if (!suggestion) {
-    return sendError(res, 404, "NOT_FOUND", "Suggestion not found.");
+    throw new AppError("Suggestion not found.", 404);
   }
 
   return res.json({ message: "Suggestion deleted." });
-};
+});
 
 export { listSuggestions, createSuggestion, deleteSuggestion };

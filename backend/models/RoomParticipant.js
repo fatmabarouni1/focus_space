@@ -11,5 +11,7 @@ const roomParticipantSchema = new mongoose.Schema(
 );
 
 roomParticipantSchema.index({ room_id: 1, user_id: 1 }, { unique: true });
+roomParticipantSchema.index({ user_id: 1, joined_at: -1 }, { background: true });
+roomParticipantSchema.index({ room_id: 1, joined_at: -1 }, { background: true });
 
 export default mongoose.model("RoomParticipant", roomParticipantSchema);

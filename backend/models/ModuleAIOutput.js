@@ -10,7 +10,7 @@ const moduleAiOutputSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["summary", "quiz", "resources"],
+      enum: ["summary", "quiz", "resources", "keywords"],
       required: true,
     },
     inputSnapshot: {
@@ -25,11 +25,14 @@ const moduleAiOutputSchema = new mongoose.Schema(
       pdfNames: [{ type: String, default: "" }],
     },
     outputJson: { type: mongoose.Schema.Types.Mixed, default: {} },
+    isSaved: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },
   { versionKey: false }
 );
 
 moduleAiOutputSchema.index({ userId: 1, moduleId: 1, type: 1, createdAt: -1 });
+moduleAiOutputSchema.index({ userId: 1, moduleId: 1, type: 1, isSaved: -1, createdAt: -1 });
+moduleAiOutputSchema.index({ moduleId: 1, createdAt: -1 }, { background: true });
 
 export default mongoose.model("ModuleAIOutput", moduleAiOutputSchema);

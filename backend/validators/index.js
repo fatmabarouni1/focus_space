@@ -86,7 +86,9 @@ const authSchemas = {
 };
 
 const adminSchemas = {
-  listUsersQuery: paginationQuery,
+  listUsersQuery: z.object({
+    search: z.string().trim().optional(),
+  }),
   updateRoleParams: z.object({ id: objectId }),
   updateRoleBody: z.object({ role }),
 };
@@ -193,6 +195,13 @@ const moduleSchemas = {
 
 const aiSchemas = {
   moduleIdParams: z.object({ moduleId: objectId }),
+  resourceSearchBody: z.object({
+    query: z.string().trim().min(2).max(200),
+  }),
+  saveOutputBody: z.object({
+    type: z.enum(["summary", "quiz", "resources", "keywords"]),
+    output: z.record(z.any()),
+  }),
 };
 
 const studyCompanionSchemas = {

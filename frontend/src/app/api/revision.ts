@@ -9,6 +9,19 @@ export type RevisionModule = {
   updated_at?: string;
 };
 
+export type PaginationMeta = {
+  hasMore: boolean;
+  nextCursor: string | null;
+  total: number;
+  limit: number;
+};
+
+export type PaginatedResponse<T> = {
+  success: true;
+  data: T[];
+  pagination: PaginationMeta;
+};
+
 export type ModuleDocument = {
   _id: string;
   originalName: string;
@@ -43,13 +56,22 @@ export type ResourceRecommendation = {
   difficulty: "beginner" | "intermediate" | "advanced";
 };
 
+export type ResourceSearchResult = {
+  title: string;
+  link: string;
+  snippet: string;
+  position: number;
+};
+
 export type StudyCoachSummary = {
   title?: string;
   summary: string;
+  detailedSummary?: string;
   keyConcepts?: string[];
   mainIdeas?: string[];
   importantDefinitions?: { term: string; definition: string }[];
   keyTakeaways?: string[];
+  importantNotes?: string[];
   keyPoints: string[];
   glossary: { term: string; definition: string }[];
 };
@@ -69,16 +91,29 @@ export type StudyCoachResources = {
   recommendedResources: ResourceRecommendation[];
 };
 
+export type StudyCoachKeywords = {
+  title?: string;
+  keywords: string[];
+};
+
 export type StudyCoachResponse<T> = {
   cached: boolean;
   output: T;
   createdAt?: string;
+  isSaved?: boolean;
   meta?: {
     notesIncluded: boolean;
     pdfTextIncluded: boolean;
     extractedChars: number;
     pdfExtractionWarning?: boolean;
   };
+};
+
+export type ModuleAiOutputs = {
+  summary?: StudyCoachResponse<StudyCoachSummary>;
+  quiz?: StudyCoachResponse<StudyCoachQuiz>;
+  resources?: StudyCoachResponse<{ query?: string; results?: ResourceSearchResult[] }>;
+  keywords?: StudyCoachResponse<StudyCoachKeywords>;
 };
 
 const getAuthHeaders = (token: string) => ({
@@ -95,15 +130,36 @@ const parseJsonSafe = async (response: Response) => {
   }
 };
 
-export async function fetchModules(token: string): Promise<RevisionModule[]> {
-  const response = await fetch(buildApiUrl("/api/revision/modules"), {
+export async function fetchModulesPage(
+  token: string,
+  params?: { limit?: number; cursor?: string | null }
+): Promise<PaginatedResponse<RevisionModule>> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) {
+    searchParams.set("limit", String(params.limit));
+  }
+  if (params?.cursor) {
+    searchParams.set("cursor", params.cursor);
+  }
+
+  const suffix = searchParams.toString() ? `?${searchParams.toString()}` : "";
+  const response = await fetch(buildApiUrl(`/api/revision/modules${suffix}`), {
     headers: getAuthHeaders(token),
   });
   if (!response.ok) {
     throw new Error("Failed to load modules.");
   }
   const data = await response.json();
-  return data.modules ?? [];
+  return {
+    success: true,
+    data: data.data ?? [],
+    pagination: data.pagination ?? {
+      hasMore: false,
+      nextCursor: null,
+      total: 0,
+      limit: params?.limit ?? 20,
+    },
+  };
 }
 
 export async function createModule(
@@ -162,7 +218,7 @@ export async function fetchDocuments(
     throw new Error("Failed to load documents.");
   }
   const data = await response.json();
-  return data.documents ?? [];
+  return data.data ?? [];
 }
 
 export async function uploadDocument(
@@ -208,7 +264,7 @@ export async function fetchNote(
     throw new Error("Failed to load note.");
   }
   const data = await response.json();
-  return data.note ?? null;
+  return data.data?.[0] ?? null;
 }
 
 export async function saveNote(
@@ -293,6 +349,20 @@ export async function generateModuleSummary(
   return data;
 }
 
+export async function fetchModuleAiOutputs(
+  token: string,
+  moduleId: string
+): Promise<ModuleAiOutputs> {
+  const response = await fetch(buildApiUrl(`/api/modules/${moduleId}/ai`), {
+    headers: getAuthHeaders(token),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Failed to load AI outputs.");
+  }
+  return data?.outputs ?? {};
+}
+
 export async function generateModuleQuiz(
   token: string,
   moduleId: string
@@ -321,6 +391,70 @@ export async function generateModuleResources(
     throw new Error(
       data?.error?.message || data?.message || "Failed to generate resources."
     );
+  }
+  return data;
+}
+
+export async function searchModuleResources(
+  token: string,
+  moduleId: string,
+  query: string
+): Promise<{ query: string; results: ResourceSearchResult[] }> {
+  const response = await fetch(buildApiUrl(`/api/modules/${moduleId}/resources/search`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(token),
+    },
+    body: JSON.stringify({ query }),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Failed to search resources.");
+  }
+  return {
+    query: data?.query ?? query,
+    results: data?.results ?? [],
+  };
+}
+
+export async function saveModuleAiOutput<T extends Record<string, any>>(
+  token: string,
+  moduleId: string,
+  type: "summary" | "quiz" | "resources" | "keywords",
+  output: T
+): Promise<StudyCoachResponse<T>> {
+  const response = await fetch(buildApiUrl(`/api/modules/${moduleId}/ai/save`), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(token),
+    },
+    body: JSON.stringify({ type, output }),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Failed to save AI output.");
+  }
+  return {
+    cached: false,
+    output: data?.output ?? output,
+    createdAt: data?.createdAt,
+    isSaved: Boolean(data?.isSaved),
+  };
+}
+
+export async function generateModuleKeywords(
+  token: string,
+  moduleId: string
+): Promise<StudyCoachResponse<StudyCoachKeywords>> {
+  const response = await fetch(buildApiUrl(`/api/modules/${moduleId}/ai/keywords`), {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  const data = await parseJsonSafe(response);
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || "Failed to generate keywords.");
   }
   return data;
 }

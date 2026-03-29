@@ -2,6 +2,7 @@ import Room from "../models/Room.js";
 import RoomParticipant from "../models/RoomParticipant.js";
 import User from "../models/User.js";
 import { sendError } from "../utils/errors.js";
+import { createPaginationEnvelope } from "../utils/paginate.js";
 
 const sanitizeTitle = (value) =>
   value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
@@ -59,16 +60,51 @@ const createRoom = async (req, res) => {
 };
 
 const listRooms = async (req, res) => {
-  const rooms = await Room.find({ is_active: true })
-    .sort({ participants_count: -1, updatedAt: -1 })
+  const limit = req.pagination?.limit ?? 20;
+  const cursor = req.pagination?.cursor;
+  const membershipFilter = { user_id: req.user.id };
+
+  if (cursor) {
+    membershipFilter._id = { $lt: cursor };
+  }
+
+  const memberships = await RoomParticipant.find(membershipFilter)
+    .sort({ _id: -1 })
+    .limit(limit + 1)
+    .lean();
+
+  const hasMore = memberships.length > limit;
+  const pageMemberships = hasMore ? memberships.slice(0, limit) : memberships;
+  const roomIds = pageMemberships.map((membership) => membership.room_id);
+
+  const rooms = await Room.find({
+    _id: { $in: roomIds },
+    is_active: true,
+  })
     .populate("host_user_id", "name")
     .lean();
 
-  const payload = rooms.map((room) =>
-    toRoomSummary(room, room.host_user_id)
+  const roomById = new Map(
+    rooms.map((room) => [String(room._id), room])
   );
 
-  return res.json({ rooms: payload });
+  const data = pageMemberships
+    .map((membership) => roomById.get(String(membership.room_id)))
+    .filter(Boolean)
+    .map((room) => toRoomSummary(room, room.host_user_id));
+
+  const total = await RoomParticipant.countDocuments({ user_id: req.user.id });
+
+  return res.json(
+    createPaginationEnvelope(data, {
+      hasMore,
+      nextCursor: hasMore
+        ? String(pageMemberships[pageMemberships.length - 1]?._id ?? "")
+        : null,
+      total,
+      limit,
+    })
+  );
 };
 
 const getRoom = async (req, res) => {

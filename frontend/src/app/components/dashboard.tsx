@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { StudyTimer } from '@/app/components/study-timer';
 import { StudyRoom } from '@/app/components/study-room';
 import { fetchSuggestions, type Suggestion } from '@/app/api/suggestions';
@@ -38,6 +39,7 @@ export function Dashboard({
   onOpenRooms,
   onJoinRoom,
 }: DashboardProps) {
+  const { t } = useTranslation();
   const [dashboardData, setDashboardData] = useState<DashboardPayload | null>(null);
   const [dashboardError, setDashboardError] = useState("");
   const [courseSuggestions, setCourseSuggestions] = useState<Suggestion[]>([]);
@@ -68,7 +70,7 @@ export function Dashboard({
       const data = await fetchDashboard(authToken);
       setDashboardData(data);
     } catch (error: any) {
-      setDashboardError(error.message || "Failed to load dashboard.");
+      setDashboardError(error.message || t('dashboard.suggestionsUnavailable'));
     } finally {
     }
   };
@@ -79,7 +81,7 @@ export function Dashboard({
       await completeSession(authToken, { durationMinutes });
       await loadDashboard();
     } catch (error: any) {
-      setDashboardError(error.message || "Failed to record session.");
+      setDashboardError(error.message || t('dashboard.suggestionsUnavailable'));
     }
   };
 
@@ -89,7 +91,7 @@ export function Dashboard({
       const updatedStreaks = await useFreezeToken(authToken);
       setDashboardData((prev) => (prev ? { ...prev, streaks: updatedStreaks } : prev));
     } catch (error: any) {
-      setDashboardError(error.message || "Failed to use freeze token.");
+      setDashboardError(error.message || t('dashboard.suggestionsUnavailable'));
     }
   };
 
@@ -100,7 +102,7 @@ export function Dashboard({
       const suggestions = await fetchSuggestions(authToken);
       setCourseSuggestions(suggestions);
     } catch (error: any) {
-      setSuggestionError(error.message || "Failed to load course suggestions.");
+      setSuggestionError(error.message || t('dashboard.suggestionsUnavailable'));
     } finally {
       setLoadingSuggestions(false);
     }
@@ -108,9 +110,9 @@ export function Dashboard({
 
   const getGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return t('dashboard.greetingMorning');
+    if (hour < 18) return t('dashboard.greetingAfternoon');
+    return t('dashboard.greetingEvening');
   };
 
   const formatMinutes = (minutes: number) => {
@@ -164,17 +166,17 @@ export function Dashboard({
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Pill className="bg-muted text-muted-foreground">
-              Streak {streaks?.streakCount ?? 0} days
+              {t('dashboard.streak', { count: streaks?.streakCount ?? 0 })}
             </Pill>
             {streaks?.streakStatus === 'frozen' ? (
-              <Pill className="bg-muted text-muted-foreground">Freeze used</Pill>
+              <Pill className="bg-muted text-muted-foreground">{t('dashboard.freezeUsed')}</Pill>
             ) : null}
             {streaks?.warningActive ? (
-              <Pill className="bg-amber-100 text-amber-700">Streak at risk</Pill>
+              <Pill className="bg-amber-100 text-amber-700">{t('dashboard.streakAtRisk')}</Pill>
             ) : null}
             {streaks?.warningActive && (streaks?.freezeTokens ?? 0) > 0 ? (
               <SecondaryButton size="sm" onClick={handleUseFreezeToken}>
-                Use freeze token
+                {t('dashboard.useFreezeToken')}
               </SecondaryButton>
             ) : null}
           </div>
@@ -190,9 +192,9 @@ export function Dashboard({
               <div>
                 <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground">
                   <Sparkles className="h-4 w-4" />
-                  Primary focus
+                  {t('dashboard.primaryFocus')}
                 </div>
-                <h3 className="mt-2 text-2xl font-semibold">Focus Timer</h3>
+                <h3 className="mt-2 text-2xl font-semibold">{t('dashboard.focusTimer')}</h3>
               </div>
               <div className="flex flex-wrap gap-2">
                 <SecondaryButton
@@ -200,20 +202,20 @@ export function Dashboard({
                   variant={mode === 'focus' ? 'default' : 'outline'}
                   onClick={() => setMode('focus')}
                 >
-                  Focus
+                  {t('dashboard.focus')}
                 </SecondaryButton>
                 <SecondaryButton
                   size="sm"
                   variant={mode === 'break' ? 'default' : 'outline'}
                   onClick={() => setMode('break')}
                 >
-                  Break
+                  {t('dashboard.break')}
                 </SecondaryButton>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>Ambient sound</span>
+              <span>{t('dashboard.ambientSound')}</span>
               <SecondaryButton
                 size="sm"
                 variant={!activeSoundId ? 'default' : 'outline'}
@@ -222,7 +224,7 @@ export function Dashboard({
                   setSoundEnabled(false);
                 }}
               >
-                Silence
+                {t('dashboard.silence')}
               </SecondaryButton>
               <SecondaryButton
                 size="sm"
@@ -232,7 +234,7 @@ export function Dashboard({
                   setSoundEnabled(true);
                 }}
               >
-                Rain
+                {t('dashboard.rain')}
               </SecondaryButton>
               <SecondaryButton
                 size="sm"
@@ -242,10 +244,10 @@ export function Dashboard({
                   setSoundEnabled(true);
                 }}
               >
-                Cafe
+                {t('dashboard.cafe')}
               </SecondaryButton>
               <Pill className="bg-muted text-muted-foreground">
-                Alerts {soundEnabled ? 'on' : 'off'}
+                {soundEnabled ? t('dashboard.alertsOn') : t('dashboard.alertsOff')}
               </Pill>
             </div>
 
@@ -267,14 +269,16 @@ export function Dashboard({
                       <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--focus-light)]">
                         <Target className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
                       </div>
-                      Sessions today
+                      {t('dashboard.sessionsToday')}
                     </div>
                     <div className="flex items-end gap-2">
                       <div className="text-3xl font-semibold leading-none">{sessionsToday}</div>
                       <div className="pb-0.5 text-sm text-muted-foreground">/ {sessionsTarget || 0}</div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {sessionsTarget > 0 ? `${sessionsProgress}% of daily target reached` : 'Set a daily target to track momentum'}
+                      {sessionsTarget > 0
+                        ? t('dashboard.dailyTargetReached', { percent: sessionsProgress })
+                        : t('dashboard.setDailyTarget')}
                     </div>
                   </div>
                   <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-background text-sm font-medium text-foreground/80">
@@ -299,14 +303,16 @@ export function Dashboard({
                       <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-muted/50">
                         <Clock className="h-4 w-4" style={{ color: 'var(--break-primary)' }} />
                       </div>
-                      Focus time today
+                      {t('dashboard.focusTimeToday')}
                     </div>
                     <div className="flex items-end gap-2">
                       <div className="text-3xl font-semibold leading-none">{formatMinutes(focusMinutesToday)}</div>
                       <div className="pb-0.5 text-sm text-muted-foreground">/ {formatMinutes(focusMinutesTarget || 0)}</div>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      {focusMinutesTarget > 0 ? `${focusProgress}% of your target time` : 'Set a focus-time target to measure consistency'}
+                      {focusMinutesTarget > 0
+                        ? t('dashboard.targetTimeReached', { percent: focusProgress })
+                        : t('dashboard.setFocusTarget')}
                     </div>
                   </div>
                   <div className="flex h-11 w-11 items-center justify-center rounded-full border border-border/70 bg-background text-sm font-medium text-foreground/80">
@@ -334,8 +340,8 @@ export function Dashboard({
                     <TrendingUp className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
                   </div>
                   <div>
-                    <h3 className="text-base font-semibold">AI suggestion</h3>
-                    <p className="text-xs text-muted-foreground">One focused idea to guide your next study sprint.</p>
+                    <h3 className="text-base font-semibold">{t('dashboard.aiSuggestion')}</h3>
+                    <p className="text-xs text-muted-foreground">{t('dashboard.aiSuggestionSubtitle')}</p>
                   </div>
                 </div>
                 <SecondaryButton
@@ -344,17 +350,17 @@ export function Dashboard({
                 onClick={loadCourseSuggestions}
                 disabled={loadingSuggestions}
               >
-                {loadingSuggestions ? 'Loading...' : 'Refresh'}
+                {loadingSuggestions ? t('common.loading') : t('common.refresh')}
               </SecondaryButton>
             </div>
 
               {suggestionError ? (
                 <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                  <div className="font-medium text-foreground">Suggestions are temporarily unavailable</div>
+                  <div className="font-medium text-foreground">{t('dashboard.suggestionsUnavailable')}</div>
                   <div className="mt-1">{suggestionError}</div>
                   <div className="mt-3">
                     <SecondaryButton size="sm" onClick={loadCourseSuggestions} disabled={loadingSuggestions}>
-                      Try again
+                      {t('common.tryAgain')}
                     </SecondaryButton>
                   </div>
                 </div>
@@ -367,7 +373,7 @@ export function Dashboard({
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">{suggestionPreview.description}</p>
                       ) : (
                         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          Short, focused prompts to shape your next study sprint.
+                          {t('dashboard.noSuggestionDescription')}
                         </p>
                       )}
                     </div>
@@ -379,7 +385,7 @@ export function Dashboard({
                   </div>
                   <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
                     <Sparkles className="h-3.5 w-3.5" />
-                    Fresh AI guidance tuned to your current dashboard state.
+                    {t('dashboard.freshGuidance')}
                   </div>
                 </div>
               ) : loadingSuggestions ? (

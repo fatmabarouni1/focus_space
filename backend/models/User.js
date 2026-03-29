@@ -17,8 +17,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     role: { type: String, enum: ["user", "admin"], default: "user" },
-    // Hashed refresh token (SHA-256). Never store raw refresh tokens.
-    refreshToken: { type: String, default: null },
     created_at: { type: Date, default: Date.now },
     streakCount: { type: Number, default: 0 },
     lastActiveDate: { type: Date, default: null },

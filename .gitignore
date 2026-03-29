@@ -6,6 +6,13 @@ backend/node_modules/
 # Fichiers d'environnemgit checkout -b ma-brancheent
 .env
 .env.local
+.env.development
+.env.production
+backend/.env
+backend/.env.development
+backend/.env.production
+!backend/.env.example
+!.env.example
 
 # Build
 dist/

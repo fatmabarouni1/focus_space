@@ -12,4 +12,7 @@ const moduleLinkSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
+moduleLinkSchema.index({ module_id: 1, created_at: -1 }, { background: true });
+moduleLinkSchema.index({ user_id: 1, module_id: 1, created_at: -1 }, { background: true });
+
 export default mongoose.model("ModuleLink", moduleLinkSchema);

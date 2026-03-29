@@ -1,7 +1,7 @@
 import ModuleDocument from "../models/ModuleDocument.js";
 import Quiz from "../models/Quiz.js";
 import QuizAttempt from "../models/QuizAttempt.js";
-import { generateWithOllama } from "../config/ollama.js";
+import { llm } from "./llm.js";
 import { retrieveRelevantChunks } from "./retrievalService.js";
 import { ApiError } from "../utils/errors.js";
 
@@ -49,18 +49,16 @@ const generateQuizForDocument = async ({ userId, documentId, topic }) => {
     .map((chunk) => `Chunk ${chunk.chunkIndex}:\n${chunk.text}`)
     .join("\n\n");
 
-  const content = await generateWithOllama({
-    system: [
+  const content = await llm.generateText(
+    `Create a revision quiz${topic ? ` about ${topic}` : ""} from the context below.\n\n${context}`,
+    [
       "You generate study quizzes strictly in JSON.",
       "Base every question only on the provided context.",
       'Return exactly this object shape: {"questions":[{"type":"mcq","question":"...","options":["...","...","...","..."],"correctAnswer":"...","explanation":"...","topic":"...","difficulty":"easy|medium|hard"}]}',
       "Always return between 3 and 6 questions.",
       "Return only valid JSON with no markdown fences.",
-    ].join(" "),
-    prompt: `Create a revision quiz${topic ? ` about ${topic}` : ""} from the context below.\n\n${context}`,
-    temperature: 0.3,
-    format: "json",
-  });
+    ].join(" ")
+  );
 
   if (!content) {
     throw new ApiError(502, "OLLAMA_EMPTY_RESPONSE", "Ollama returned an empty quiz.");

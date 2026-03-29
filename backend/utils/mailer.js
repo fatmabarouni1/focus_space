@@ -1,14 +1,16 @@
 import nodemailer from "nodemailer";
+import config from "../config/index.js";
+import logger from "./logger.js";
 
 let transporterPromise = null;
 
 const getSmtpConfig = () => ({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: process.env.SMTP_SECURE,
-  user: process.env.SMTP_USER,
-  pass: process.env.SMTP_PASS,
-  from: process.env.SMTP_FROM,
+  host: config.mail.host,
+  port: config.mail.port,
+  secure: config.mail.secure,
+  user: config.mail.user,
+  pass: config.mail.pass,
+  from: config.mail.from,
 });
 
 const hasSmtpConfig = () =>
@@ -43,13 +45,15 @@ const createTransporter = async () => {
     },
   });
 
-  console.log(
-    `[MAILER] Verifying SMTP transporter host=${smtp.host} port=${smtp.port} secure=${
-      smtp.secure === "true" || Number(smtp.port) === 465
-    } user=${smtp.user} from=${smtp.from}`
-  );
+  logger.info("Verifying SMTP transporter", {
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.secure === true || Number(smtp.port) === 465,
+    user: smtp.user,
+    from: smtp.from,
+  });
   await transporter.verify();
-  console.log("[MAILER] SMTP transporter verified successfully.");
+  logger.info("SMTP transporter verified successfully");
   return transporter;
 };
 
@@ -67,7 +71,7 @@ const sendVerificationEmail = async (email, code) => {
   const smtp = getSmtpConfig();
   const transporter = await getTransporter();
 
-  console.log(`[MAILER] Sending verification email to ${email}`);
+  logger.info("Sending verification email", { email });
   const info = await transporter.sendMail({
     from: smtp.from,
     to: email,
@@ -75,9 +79,11 @@ const sendVerificationEmail = async (email, code) => {
     text: `Your StudyPal verification code is ${code}. Use it within 10 minutes to finish creating your account.`,
     html: `<p>Your StudyPal verification code is <strong>${code}</strong>.</p><p>Use it within 10 minutes to finish creating your account.</p>`,
   });
-  console.log(
-    `[MAILER] Verification email result messageId=${info.messageId} accepted=${info.accepted?.join(",") || ""} rejected=${info.rejected?.join(",") || ""}`
-  );
+  logger.info("Verification email sent", {
+    messageId: info.messageId,
+    accepted: info.accepted,
+    rejected: info.rejected,
+  });
   return info;
 };
 
@@ -85,7 +91,7 @@ const sendPasswordResetEmail = async (email, code) => {
   const smtp = getSmtpConfig();
   const transporter = await getTransporter();
 
-  console.log(`[MAILER] Sending password reset email to ${email}`);
+  logger.info("Sending password reset email", { email });
   const info = await transporter.sendMail({
     from: smtp.from,
     to: email,
@@ -93,9 +99,11 @@ const sendPasswordResetEmail = async (email, code) => {
     text: `Your StudyPal verification code is ${code}. Use it within 10 minutes to reset your password.`,
     html: `<p>Your StudyPal verification code is <strong>${code}</strong>.</p><p>Use it within 10 minutes to reset your password.</p>`,
   });
-  console.log(
-    `[MAILER] Password reset email result messageId=${info.messageId} accepted=${info.accepted?.join(",") || ""} rejected=${info.rejected?.join(",") || ""}`
-  );
+  logger.info("Password reset email sent", {
+    messageId: info.messageId,
+    accepted: info.accepted,
+    rejected: info.rejected,
+  });
   return info;
 };
 

@@ -1,5 +1,6 @@
 import CourseSuggestion from "../models/CourseSuggestion.js";
 import { sendError } from "../utils/errors.js";
+import logger from "../utils/logger.js";
 
 // Create a course suggestion.
 const createSuggestion = async (req, res) => {
@@ -18,7 +19,11 @@ const createSuggestion = async (req, res) => {
 
     return res.status(201).json(suggestion);
   } catch (error) {
-    console.error("Failed to create course suggestion:", error);
+    logger.error("Failed to create course suggestion", {
+      requestId: req.requestId,
+      error: error?.message,
+      stack: error?.stack,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Internal server error.");
   }
 };
@@ -29,7 +34,11 @@ const listSuggestions = async (req, res) => {
     const suggestions = await CourseSuggestion.find().sort({ createdAt: -1 });
     return res.json(suggestions);
   } catch (error) {
-    console.error("Failed to list course suggestions:", error);
+    logger.error("Failed to list course suggestions", {
+      requestId: req.requestId,
+      error: error?.message,
+      stack: error?.stack,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Internal server error.");
   }
 };

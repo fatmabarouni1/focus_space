@@ -1,20 +1,42 @@
-class ApiError extends Error {
-  constructor(status, code, message, details = []) {
+class AppError extends Error {
+  constructor(message, statusCode = 500, details = [], code = "APP_ERROR") {
     super(message);
-    this.status = status;
-    this.code = code;
+    this.name = "AppError";
+    this.statusCode = statusCode;
     this.details = details;
+    this.code = code;
+    this.isOperational = true;
+    Error.captureStackTrace?.(this, this.constructor);
   }
 }
 
-const buildErrorResponse = (code, message, details = []) => {
-  if (details && details.length > 0) {
-    return { error: { code, message, details } };
+class ApiError extends AppError {
+  constructor(status, code, message, details = []) {
+    super(message, status, details, code);
+    this.name = "ApiError";
+    this.status = status;
   }
-  return { error: { code, message } };
+}
+
+const buildErrorResponse = (message, stack) => {
+  const response = {
+    success: false,
+    error: message,
+  };
+
+  if (stack) {
+    response.stack = stack;
+  }
+
+  return response;
 };
 
 const sendError = (res, status, code, message, details = []) =>
-  res.status(status).json(buildErrorResponse(code, message, details));
+  res.status(status).json({
+    success: false,
+    error: message,
+    code,
+    ...(details.length ? { details } : {}),
+  });
 
-export { ApiError, buildErrorResponse, sendError };
+export { AppError, ApiError, buildErrorResponse, sendError };

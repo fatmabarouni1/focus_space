@@ -3,18 +3,19 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import OtpChallenge from "../models/OtpChallenge.js";
+import RefreshToken from "../models/RefreshToken.js";
+import config from "../config/index.js";
+import logger from "../utils/logger.js";
 import { sendError } from "../utils/errors.js";
 import { hasSmtpConfig, sendOtpEmail } from "../utils/mailer.js";
 
-const ACCESS_TOKEN_TTL =
-  process.env.ACCESS_TOKEN_TTL || process.env.JWT_EXPIRES_IN || "15m";
-const REFRESH_TOKEN_TTL_DAYS = Number(process.env.REFRESH_TOKEN_TTL_DAYS || 7);
-const isProduction = process.env.NODE_ENV === "production";
+const ACCESS_TOKEN_TTL = config.jwt.expiresIn;
+const REFRESH_TOKEN_TTL_DAYS = config.jwt.refreshTtlDays;
+const isProduction = config.env === "production";
 const allowLocalOtpLog =
   !isProduction &&
   (process.env.ALLOW_LOCAL_OTP_LOG || "").toLowerCase() === "true";
-const cookieSameSite =
-  process.env.COOKIE_SAME_SITE || (isProduction ? "none" : "lax");
+const cookieSameSite = config.jwt.cookieSameSite;
 
 const OTP_LENGTH = 6;
 const OTP_MAX_ATTEMPTS = 3;
@@ -24,7 +25,7 @@ const hashRefreshToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
 const createAccessToken = (user) =>
-  jwt.sign({ userId: user._id, role: user.role }, process.env.JWT_SECRET, {
+  jwt.sign({ userId: user._id, role: user.role }, config.jwt.secret, {
     expiresIn: ACCESS_TOKEN_TTL,
   });
 
@@ -63,14 +64,24 @@ const debugOtp = (message, details = {}) => {
   if (isProduction) {
     return;
   }
-  console.log(`[OTP_DEBUG] ${message}`, details);
+  logger.debug(`[OTP_DEBUG] ${message}`, details);
 };
 
 const logOtpForLocalDebug = ({ purpose, destination, code }) => {
   if (!allowLocalOtpLog) {
     return;
   }
-  console.log(`[OTP:${purpose}] -> ${destination}: ${code}`);
+  logger.debug(`[OTP:${purpose}] -> ${destination}: ${code}`);
+};
+
+const logAuthEvent = (req, event, userId = null, extra = {}) => {
+  logger.info("Auth event", {
+    event,
+    userId,
+    ip: req.ip,
+    requestId: req.requestId,
+    ...extra,
+  });
 };
 
 const sendOtpCode = async ({ method, email, phone, code, purpose }) => {
@@ -107,11 +118,32 @@ const clearRefreshCookie = (res) => {
   });
 };
 
+const getRefreshTokenExpiryDate = () =>
+  new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+
+const storeRefreshToken = async (userId, rawToken) => {
+  const tokenHash = hashRefreshToken(rawToken);
+  return RefreshToken.create({
+    userId,
+    tokenHash,
+    expiresAt: getRefreshTokenExpiryDate(),
+    used: false,
+  });
+};
+
+const revokeAllRefreshTokensForUser = async (userId) => {
+  await RefreshToken.deleteMany({ userId });
+};
+
+const revokeRefreshTokenByRawToken = async (rawToken) => {
+  if (!rawToken) return;
+  await RefreshToken.deleteOne({ tokenHash: hashRefreshToken(rawToken) });
+};
+
 const issueAuthTokens = async (res, user) => {
   const accessToken = createAccessToken(user);
   const refreshToken = createRefreshToken();
-  user.refreshToken = hashRefreshToken(refreshToken);
-  await user.save();
+  await storeRefreshToken(user._id, refreshToken);
   setRefreshCookie(res, refreshToken);
   return accessToken;
 };
@@ -302,7 +334,12 @@ const register = async (req, res) => {
       buildSecureOtpResponse("Verification code sent successfully")
     );
   } catch (error) {
-    console.error("register error:", error);
+    logger.error("register error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to register user.");
   }
 };
@@ -350,7 +387,12 @@ const registerInitiate = async (req, res) => {
 
     return res.json(buildSecureOtpResponse("Verification code sent successfully"));
   } catch (error) {
-    console.error("registerInitiate error:", error);
+    logger.error("registerInitiate error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to process verification request.");
   }
 };
@@ -418,6 +460,9 @@ const registerVerify = async (req, res) => {
 
     await OtpChallenge.deleteOne({ _id: challenge._id });
     const accessToken = await issueAuthTokens(res, user);
+    logAuthEvent(req, "login_success", user._id.toString(), {
+      source: "register_verify",
+    });
 
     return res.status(201).json({
       message: "Registration verified successfully.",
@@ -432,7 +477,12 @@ const registerVerify = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("registerVerify error:", error);
+    logger.error("registerVerify error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(
       res,
       500,
@@ -453,9 +503,13 @@ const login = async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return sendError(res, 401, "UNAUTHORIZED", "Invalid credentials.");
+      logAuthEvent(req, "login_failed", null, { reason: "email_not_found" });
+      return sendError(res, 404, "EMAIL_NOT_FOUND", "No account exists with this email.");
     }
     if (user.verificationMethod === "email" && user.emailVerified === false) {
+      logAuthEvent(req, "login_failed", user._id.toString(), {
+        reason: "email_not_verified",
+      });
       return sendError(
         res,
         403,
@@ -466,12 +520,14 @@ const login = async (req, res) => {
 
     const storedPassword = user.password || user.password_hash;
     if (!storedPassword) {
-      return sendError(res, 401, "UNAUTHORIZED", "Invalid credentials.");
+      logAuthEvent(req, "login_failed", user._id.toString(), { reason: "missing_password" });
+      return sendError(res, 401, "INVALID_PASSWORD", "Wrong password.");
     }
 
     const passwordMatches = await bcrypt.compare(password, storedPassword);
     if (!passwordMatches) {
-      return sendError(res, 401, "UNAUTHORIZED", "Invalid credentials.");
+      logAuthEvent(req, "login_failed", user._id.toString(), { reason: "invalid_password" });
+      return sendError(res, 401, "INVALID_PASSWORD", "Wrong password.");
     }
 
     if (!user.password && user.password_hash) {
@@ -480,6 +536,7 @@ const login = async (req, res) => {
     }
 
     const accessToken = await issueAuthTokens(res, user);
+    logAuthEvent(req, "login_success", user._id.toString());
 
     return res.json({
       message: "Login successful.",
@@ -494,7 +551,12 @@ const login = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("login error:", error);
+    logger.error("login error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to login.");
   }
 };
@@ -536,7 +598,12 @@ const requestPasswordReset = async (req, res) => {
 
     return res.json(buildSecureOtpResponse("Verification code sent successfully"));
   } catch (error) {
-    console.error("requestPasswordReset error:", error);
+    logger.error("requestPasswordReset error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to process password reset.");
   }
 };
@@ -575,6 +642,7 @@ const verifyPasswordReset = async (req, res) => {
       user.password = await bcrypt.hash(newPassword, 12);
       user.password_hash = null;
       await user.save();
+      await revokeAllRefreshTokensForUser(user._id);
     }
 
     await OtpChallenge.deleteOne({ _id: challenge._id });
@@ -583,7 +651,12 @@ const verifyPasswordReset = async (req, res) => {
       message: "Password updated successfully.",
     });
   } catch (error) {
-    console.error("verifyPasswordReset error:", error);
+    logger.error("verifyPasswordReset error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to verify password reset.");
   }
 };
@@ -597,18 +670,71 @@ const refresh = async (req, res) => {
     }
 
     const hashedToken = hashRefreshToken(token);
-    const user = await User.findOne({ refreshToken: hashedToken });
-    if (!user) {
+    const existingToken = await RefreshToken.findOne({ tokenHash: hashedToken });
+    if (!existingToken) {
       clearRefreshCookie(res);
+      logAuthEvent(req, "login_failed", null, { reason: "refresh_token_invalid" });
       return sendError(res, 401, "UNAUTHORIZED", "Refresh token invalid or reused.");
+    }
+
+    if (existingToken.used) {
+      await revokeAllRefreshTokensForUser(existingToken.userId);
+      clearRefreshCookie(res);
+      logAuthEvent(req, "breach_detected", existingToken.userId?.toString?.() || null);
+      return sendError(
+        res,
+        401,
+        "TOKEN_REUSE_DETECTED",
+        "Refresh token reuse detected. All sessions were revoked."
+      );
+    }
+
+    if (existingToken.expiresAt <= new Date()) {
+      await RefreshToken.deleteOne({ _id: existingToken._id });
+      clearRefreshCookie(res);
+      return sendError(res, 401, "UNAUTHORIZED", "Refresh token expired.");
+    }
+
+    const rotatedToken = await RefreshToken.findOneAndUpdate(
+      {
+        _id: existingToken._id,
+        used: false,
+        expiresAt: { $gt: new Date() },
+      },
+      {
+        $set: {
+          used: true,
+          usedAt: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    if (!rotatedToken) {
+      await revokeAllRefreshTokensForUser(existingToken.userId);
+      clearRefreshCookie(res);
+      logAuthEvent(req, "breach_detected", existingToken.userId?.toString?.() || null);
+      return sendError(
+        res,
+        401,
+        "TOKEN_REUSE_DETECTED",
+        "Refresh token reuse detected. All sessions were revoked."
+      );
+    }
+
+    const user = await User.findById(existingToken.userId);
+    if (!user) {
+      await revokeAllRefreshTokensForUser(existingToken.userId);
+      clearRefreshCookie(res);
+      return sendError(res, 401, "UNAUTHORIZED", "Refresh token invalid.");
     }
 
     const accessToken = createAccessToken(user);
     const newRefreshToken = createRefreshToken();
-    user.refreshToken = hashRefreshToken(newRefreshToken);
-    await user.save();
+    await storeRefreshToken(user._id, newRefreshToken);
 
     setRefreshCookie(res, newRefreshToken);
+    logAuthEvent(req, "token_refreshed", user._id.toString());
 
     return res.json({
       message: "Token refreshed.",
@@ -616,6 +742,12 @@ const refresh = async (req, res) => {
       token: accessToken,
     });
   } catch (error) {
+    logger.error("refresh error", {
+      requestId: req.requestId,
+      ip: req.ip,
+      stack: error?.stack,
+      error: error?.message,
+    });
     return sendError(res, 500, "INTERNAL_ERROR", "Unable to refresh token.");
   }
 };
@@ -625,11 +757,7 @@ const logout = async (req, res) => {
   try {
     const token = req.cookies?.refreshToken;
     if (token) {
-      const hashedToken = hashRefreshToken(token);
-      await User.updateOne(
-        { refreshToken: hashedToken },
-        { $set: { refreshToken: null } }
-      );
+      await revokeRefreshTokenByRawToken(token);
     }
 
     clearRefreshCookie(res);

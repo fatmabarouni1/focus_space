@@ -1,5 +1,6 @@
 import express from "express";
 import authMiddleware from "../middleware/authMiddleware.js";
+import paginateMiddleware from "../middleware/paginateMiddleware.js";
 import validate from "../middleware/validate.js";
 import {
   createRoom,
@@ -18,7 +19,7 @@ router.post(
   validate({ body: roomSchemas.createBody }),
   createRoom
 );
-router.get("/", authMiddleware, listRooms);
+router.get("/", authMiddleware, paginateMiddleware("cursor"), listRooms);
 router.get(
   "/:roomId",
   authMiddleware,

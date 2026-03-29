@@ -1,6 +1,6 @@
 import ModuleDocument from "../models/ModuleDocument.js";
 import StudyChat from "../models/StudyChat.js";
-import { generateWithOllama } from "../config/ollama.js";
+import { llm } from "./llm.js";
 import { retrieveRelevantChunks } from "./retrievalService.js";
 import { ApiError } from "../utils/errors.js";
 
@@ -58,16 +58,15 @@ const answerQuestionWithDocument = async ({
     )
     .join("\n\n");
 
-  const answer = await generateWithOllama({
-    system: [
+  const answer = await llm.generateText(
+    `Question:\n${question}\n\nDocument context:\n${context}`,
+    [
       "You are an AI study companion.",
       "Answer only using the supplied document context.",
       "If the answer is not clearly supported by the context, say that explicitly.",
       MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.detailed,
-    ].join(" "),
-    prompt: `Question:\n${question}\n\nDocument context:\n${context}`,
-    temperature: 0.2,
-  });
+    ].join(" ")
+  );
 
   if (!answer) {
     throw new ApiError(502, "OLLAMA_EMPTY_RESPONSE", "Ollama returned an empty answer.");

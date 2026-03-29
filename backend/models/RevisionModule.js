@@ -12,4 +12,6 @@ const revisionModuleSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
+revisionModuleSchema.index({ user_id: 1, updated_at: -1 }, { background: true });
+
 export default mongoose.model("RevisionModule", revisionModuleSchema);

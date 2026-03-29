@@ -1,22 +1,23 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
-import mongoose from "mongoose";
 import cookieParser from "cookie-parser";
-import path from "path";
 import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.join(__dirname, ".env") });
+import packageJson from "./package.json" with { type: "json" };
+import config from "./config/index.js";
+import { connectDatabase, getDatabaseHealth } from "./config/db.js";
+import { llm } from "./services/llm.js";
+import logger from "./utils/logger.js";
+import httpLogger from "./middleware/httpLogger.js";
+import mongoose from "mongoose";
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-const clientOrigins = (process.env.CLIENT_ORIGIN || "http://localhost:5173")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const PORT = config.port;
+const clientOrigins = config.app.clientOrigins;
+const uploadsPath = fileURLToPath(new URL("./uploads", import.meta.url));
+const maskMongoUri = (value) => {
+  if (!value) return "";
+  return value.replace(/(mongodb(?:\+srv)?:\/\/)([^@/]+)@/i, "$1***:***@");
+};
 
 const bootstrap = async () => {
   const [
@@ -34,9 +35,7 @@ const bootstrap = async () => {
     { default: roomRoutes },
     { default: moduleAiRoutes },
     { default: studyCompanionRoutes },
-    { default: securityLogger },
     authMiddlewareModule,
-    ollamaConfigModule,
     { default: adminRoutes },
     { default: notFound },
     { default: errorHandler },
@@ -55,9 +54,7 @@ const bootstrap = async () => {
     import("./routes/roomRoutes.js"),
     import("./routes/moduleAiRoutes.js"),
     import("./routes/studyCompanionRoutes.js"),
-    import("./middleware/securityLogger.js"),
     import("./middleware/authMiddleware.js"),
-    import("./config/ollama.js"),
     import("./routes/adminRoutes.js"),
     import("./middleware/notFound.js"),
     import("./middleware/errorHandler.js"),
@@ -65,7 +62,6 @@ const bootstrap = async () => {
 
   const requireAuth = authMiddlewareModule.default;
   const { requireRole } = authMiddlewareModule;
-  const { checkOllamaAvailability } = ollamaConfigModule;
 
   app.use(
     cors({
@@ -75,11 +71,25 @@ const bootstrap = async () => {
   );
   app.use(express.json());
   app.use(cookieParser());
-  app.use(securityLogger);
-  app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+  app.use(httpLogger);
+  app.use("/uploads", express.static(uploadsPath));
 
   app.get("/", (req, res) => {
     res.send("StudyPal backend is running");
+  });
+
+  app.get("/health", async (req, res) => {
+    const llmStatus = await llm.isAvailable();
+    res.json({
+      status: "ok",
+      env: config.env,
+      version: packageJson.version,
+      services: {
+        database: getDatabaseHealth(),
+        llm: llmStatus.ok ? "ok" : "unavailable",
+      },
+      timestamp: new Date().toISOString(),
+    });
   });
 
   app.use("/api/auth", authRoutes);
@@ -107,25 +117,55 @@ const bootstrap = async () => {
   app.use(notFound);
   app.use(errorHandler);
 
-  if (!process.env.MONGODB_URI) {
-    throw new Error("Missing MONGODB_URI in backend/.env");
-  }
+  mongoose.connection.on("connected", () => {
+    logger.info("MongoDB connected", {
+      event: "mongodb_connected",
+      requestId: null,
+    });
+  });
+  mongoose.connection.on("disconnected", () => {
+    logger.warn("MongoDB disconnected", {
+      event: "mongodb_disconnected",
+      requestId: null,
+    });
+  });
+  mongoose.connection.on("error", (error) => {
+    logger.error("MongoDB connection error", {
+      event: "mongodb_error",
+      error: error?.message,
+      stack: error?.stack,
+      requestId: null,
+    });
+  });
 
-  await mongoose.connect(process.env.MONGODB_URI);
-  console.log("Connected to MongoDB");
+  await connectDatabase();
 
-  const ollamaStatus = await checkOllamaAvailability();
-  if (ollamaStatus.ok) {
-    console.log(ollamaStatus.message);
+  const llmStatus = await llm.isAvailable();
+  if (llmStatus.ok) {
+    logger.info("LLM ready", {
+      provider: llmStatus.provider,
+      model: llmStatus.model,
+    });
   } else {
-    console.warn(`[OLLAMA_WARNING] ${ollamaStatus.message}`);
+    logger.warn("LLM unavailable", {
+      provider: llmStatus.provider,
+      model: llmStatus.model,
+    });
   }
 
   app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    logger.info("Server started", {
+      env: config.env,
+      port: PORT,
+      llmProvider: config.llm.provider,
+      mongoUri: maskMongoUri(config.db.uri),
+    });
   });
 };
 
 bootstrap().catch((error) => {
-  console.error("Server bootstrap error:", error);
+  logger.error("Server bootstrap error", {
+    error: error?.message,
+    stack: error?.stack,
+  });
 });

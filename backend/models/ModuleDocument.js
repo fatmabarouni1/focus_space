@@ -30,6 +30,8 @@ const moduleDocumentSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
-moduleDocumentSchema.index({ user_id: 1, module_id: 1, uploadedAt: -1 });
+moduleDocumentSchema.index({ module_id: 1, uploadedAt: -1 }, { background: true });
+moduleDocumentSchema.index({ user_id: 1 }, { background: true });
+moduleDocumentSchema.index({ user_id: 1, module_id: 1, uploadedAt: -1 }, { background: true });
 
 export default mongoose.model("ModuleDocument", moduleDocumentSchema);

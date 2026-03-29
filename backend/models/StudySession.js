@@ -16,4 +16,7 @@ const studySessionSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
+studySessionSchema.index({ created_by: 1, start_time: -1 }, { background: true });
+studySessionSchema.index({ created_by: 1, status: 1, completed_at: -1 }, { background: true });
+
 export default mongoose.model("StudySession", studySessionSchema);

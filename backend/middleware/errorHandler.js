@@ -1,57 +1,78 @@
 import mongoose from "mongoose";
-import { ApiError, buildErrorResponse } from "../utils/errors.js";
+import { AppError, ApiError, buildErrorResponse } from "../utils/errors.js";
+import config from "../config/index.js";
+import logger from "../utils/logger.js";
 
 const errorHandler = (err, req, res, next) => {
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = config.env === "production";
 
-  let status = 500;
-  let code = "INTERNAL_ERROR";
-  let message = "An unexpected error occurred.";
-  let details = [];
+  let statusCode = err?.statusCode || err?.status || 500;
+  let message = err?.message || "Internal server error";
+  let isOperational = Boolean(err?.isOperational);
 
-  if (err instanceof ApiError) {
-    status = err.status;
-    code = err.code;
+  if (err instanceof AppError || err instanceof ApiError) {
+    statusCode = err.statusCode || err.status || 500;
     message = err.message;
-    details = err.details || [];
+    isOperational = true;
   } else if (err?.name === "TokenExpiredError") {
-    status = 401;
-    code = "UNAUTHORIZED";
+    statusCode = 401;
     message = "Token expired.";
+    isOperational = true;
   } else if (err?.name === "JsonWebTokenError") {
-    status = 401;
-    code = "UNAUTHORIZED";
+    statusCode = 401;
     message = "Invalid token.";
+    isOperational = true;
   } else if (err?.name === "ValidationError") {
-    status = 400;
-    code = "VALIDATION_ERROR";
-    message = "Invalid data.";
-    details = Object.values(err.errors || {}).map((item) => ({
-      path: item?.path || "root",
-      message: item?.message || "Invalid value.",
-    }));
+    statusCode = 400;
+    message = Object.values(err.errors || {})
+      .map((item) => item?.message || "Invalid value.")
+      .join(", ") || "Validation failed.";
+    isOperational = true;
   } else if (err?.name === "CastError" && err?.kind === "ObjectId") {
-    status = 400;
-    code = "VALIDATION_ERROR";
-    message = "Invalid id format.";
-    details = [{ path: err?.path || "id", message: "Invalid ObjectId." }];
+    statusCode = 400;
+    message = `Invalid ${err?.path || "id"}: ${err?.value}`;
+    isOperational = true;
+  } else if (err?.code === 11000) {
+    const fields = Object.keys(err?.keyValue || {});
+    message = fields.length
+      ? `${fields.join(", ")} already exists.`
+      : "Duplicate value error.";
+    statusCode = 409;
+    isOperational = true;
   } else if (err?.type === "entity.parse.failed") {
-    status = 400;
-    code = "VALIDATION_ERROR";
+    statusCode = 400;
     message = "Invalid JSON payload.";
+    isOperational = true;
   } else if (err instanceof mongoose.Error) {
-    status = 400;
-    code = "VALIDATION_ERROR";
-    message = "Database validation failed.";
+    statusCode = 400;
+    message = "Database error.";
+    isOperational = true;
   }
 
-  if (!isProduction) {
-    console.error(err);
+  const logPayload = {
+    requestId: req.requestId,
+    path: req.originalUrl || req.path,
+    method: req.method,
+    statusCode,
+    stack: err?.stack,
+    error: err?.message || message,
+  };
+
+  if (statusCode >= 500) {
+    logger.error("Unhandled server error", logPayload);
+  } else {
+    logger.warn("Handled request error", logPayload);
+  }
+
+  if (isProduction && !isOperational) {
+    return res.status(500).json(buildErrorResponse("Internal server error"));
   }
 
   return res
-    .status(status)
-    .json(buildErrorResponse(code, message, details));
+    .status(statusCode)
+    .json(
+      buildErrorResponse(message, isProduction ? undefined : err?.stack)
+    );
 };
 
 export default errorHandler;

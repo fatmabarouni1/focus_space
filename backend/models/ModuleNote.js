@@ -11,4 +11,7 @@ const moduleNoteSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
+moduleNoteSchema.index({ module_id: 1 }, { background: true });
+moduleNoteSchema.index({ user_id: 1, module_id: 1 }, { unique: true, background: true });
+
 export default mongoose.model("ModuleNote", moduleNoteSchema);

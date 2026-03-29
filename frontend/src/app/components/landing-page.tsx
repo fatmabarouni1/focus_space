@@ -1,12 +1,16 @@
 import { BookOpen, Timer, StickyNote, Users, ArrowRight, Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/app/components/ui/button';
 import { Card } from '@/app/components/ui/card';
+import { LanguageSelector } from '@/app/components/language-selector';
 
 interface LandingPageProps {
   onGetStarted: () => void;
 }
 
 export function LandingPage({ onGetStarted }: LandingPageProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
@@ -21,25 +25,29 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
         
         <div className="container mx-auto px-6 py-20 relative z-10">
           {/* Logo and brand */}
-          <div className="flex items-center justify-center gap-3 mb-6">
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <div className="w-32" />
             <div 
               className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg"
               style={{ backgroundColor: 'var(--focus-light)' }}
             >
               <BookOpen className="h-8 w-8" style={{ color: 'var(--focus-primary)' }} />
             </div>
+            <div className="w-32">
+              <LanguageSelector />
+            </div>
           </div>
 
           {/* Hero content */}
           <div className="max-w-3xl mx-auto text-center space-y-6 mb-12">
             <h1 className="text-5xl md:text-6xl mb-4">
-              Focus Space
+              {t('landing.heroTitle')}
             </h1>
             <p className="text-xl md:text-2xl text-muted-foreground">
-              Your peaceful productivity companion
+              {t('landing.heroSubtitle')}
             </p>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Stay focused, work together silently, and achieve your goals with our minimalist study platform designed to reduce distractions and boost concentration.
+              {t('landing.heroDescription')}
             </p>
 
             {/* CTA Buttons */}
@@ -53,7 +61,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                   color: 'white'
                 }}
               >
-                Get Started
+                {t('landing.getStarted')}
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button 
@@ -62,12 +70,12 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                 size="lg"
                 className="text-lg px-8 py-6"
               >
-                Sign In
+                {t('landing.signIn')}
               </Button>
             </div>
 
             <p className="text-sm text-muted-foreground pt-2">
-              No credit card required • Free to use
+              {t('landing.freeNote')}
             </p>
           </div>
 
@@ -105,9 +113,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
       <div className="py-20 bg-muted/30">
         <div className="container mx-auto px-6">
           <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-4xl mb-4">Everything you need to stay focused</h2>
+            <h2 className="text-3xl md:text-4xl mb-4">{t('landing.featuresTitle')}</h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Simple, effective tools designed to help you concentrate without overwhelming you
+              {t('landing.featuresSubtitle')}
             </p>
           </div>
 
@@ -120,9 +128,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               >
                 <Timer className="h-6 w-6" style={{ color: 'var(--focus-primary)' }} />
               </div>
-              <h3 className="mb-2">Smart Productivity Timer</h3>
+              <h3 className="mb-2">{t('landing.featureTimerTitle')}</h3>
               <p className="text-muted-foreground">
-                Customizable Pomodoro timer with focus and break sessions. Stay on track with visual and audio cues.
+                {t('landing.featureTimerDescription')}
               </p>
             </Card>
 
@@ -134,9 +142,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               >
                 <StickyNote className="h-6 w-6" style={{ color: 'var(--success)' }} />
               </div>
-              <h3 className="mb-2">Quick Note Taking</h3>
+              <h3 className="mb-2">{t('landing.featureNotesTitle')}</h3>
               <p className="text-muted-foreground">
-                Capture ideas and tasks instantly. Keep everything organized in one clean, distraction-free interface.
+                {t('landing.featureNotesDescription')}
               </p>
             </Card>
 
@@ -148,9 +156,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               >
                 <Users className="h-6 w-6" style={{ color: 'var(--break-primary)' }} />
               </div>
-              <h3 className="mb-2">Silent Study Rooms</h3>
+              <h3 className="mb-2">{t('landing.featureRoomsTitle')}</h3>
               <p className="text-muted-foreground">
-                Work alongside others without distraction. See who's focusing and stay motivated together.
+                {t('landing.featureRoomsDescription')}
               </p>
             </Card>
           </div>
@@ -171,9 +179,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     <Sparkles className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
                   </div>
                   <div>
-                    <h3 className="mb-2">Minimal & Calm Design</h3>
+                    <h3 className="mb-2">{t('landing.benefitOneTitle')}</h3>
                     <p className="text-muted-foreground">
-                      Soft colors and clear layouts reduce cognitive overload, helping you focus on what matters.
+                      {t('landing.benefitOneDescription')}
                     </p>
                   </div>
                 </div>
@@ -186,9 +194,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     <Sparkles className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
                   </div>
                   <div>
-                    <h3 className="mb-2">Distraction-Free Environment</h3>
+                    <h3 className="mb-2">{t('landing.benefitTwoTitle')}</h3>
                     <p className="text-muted-foreground">
-                      No social feeds, no notifications, no clutter. Just you and your work.
+                      {t('landing.benefitTwoDescription')}
                     </p>
                   </div>
                 </div>
@@ -201,9 +209,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     <Sparkles className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
                   </div>
                   <div>
-                    <h3 className="mb-2">Built for Everyone</h3>
+                    <h3 className="mb-2">{t('landing.benefitThreeTitle')}</h3>
                     <p className="text-muted-foreground">
-                      Whether you're a student, freelancer, or remote worker, Focus Space adapts to your workflow.
+                      {t('landing.benefitThreeDescription')}
                     </p>
                   </div>
                 </div>
@@ -218,7 +226,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     >
                       25
                     </div>
-                    <p className="text-sm text-muted-foreground">Minutes of deep focus</p>
+                    <p className="text-sm text-muted-foreground">{t('landing.deepFocusMinutes')}</p>
                   </div>
                   <div className="text-center">
                     <div 
@@ -227,11 +235,11 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                     >
                       5
                     </div>
-                    <p className="text-sm text-muted-foreground">Minutes to recharge</p>
+                    <p className="text-sm text-muted-foreground">{t('landing.rechargeMinutes')}</p>
                   </div>
                   <div className="text-center pt-4 border-t border-border">
                     <p className="text-sm text-muted-foreground">
-                      The proven Pomodoro Technique for maximum productivity
+                      {t('landing.pomodoroNote')}
                     </p>
                   </div>
                 </div>
@@ -245,9 +253,9 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
       <div className="py-20 bg-muted/30">
         <div className="container mx-auto px-6">
           <div className="max-w-3xl mx-auto text-center space-y-6">
-            <h2 className="text-3xl md:text-4xl">Ready to focus?</h2>
+            <h2 className="text-3xl md:text-4xl">{t('landing.ctaTitle')}</h2>
             <p className="text-lg text-muted-foreground">
-              Join students and professionals who achieve more with Focus Space
+              {t('landing.ctaDescription')}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
               <Button 
@@ -259,7 +267,7 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
                   color: 'white'
                 }}
               >
-                Start Focusing Now
+                {t('landing.ctaButton')}
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </div>
@@ -278,10 +286,10 @@ export function LandingPage({ onGetStarted }: LandingPageProps) {
               >
                 <BookOpen className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
               </div>
-              <span className="font-medium">Focus Space</span>
+              <span className="font-medium">{t('app.brand')}</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Your peaceful productivity companion ✨
+              {t('app.tagline')}
             </p>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
   BookOpen,
@@ -30,12 +31,12 @@ type AuthTab = "login" | "register" | "reset";
 type VerificationMethod = "email" | "sms";
 
 const PASSWORD_RULES = [
-  { key: "minLength", label: "Minimum 8 characters" },
-  { key: "uppercase", label: "At least one uppercase letter" },
-  { key: "lowercase", label: "At least one lowercase letter" },
-  { key: "number", label: "At least one number" },
-  { key: "special", label: "At least one special character" },
-  { key: "match", label: "Passwords must match" },
+  { key: "minLength", translationKey: "auth.passwordRules.minLength" },
+  { key: "uppercase", translationKey: "auth.passwordRules.uppercase" },
+  { key: "lowercase", translationKey: "auth.passwordRules.lowercase" },
+  { key: "number", translationKey: "auth.passwordRules.number" },
+  { key: "special", translationKey: "auth.passwordRules.special" },
+  { key: "match", translationKey: "auth.passwordRules.match" },
 ] as const;
 
 const OTP_TTL_SECONDS = 10 * 60;
@@ -61,6 +62,7 @@ const tabButtonClassName =
   "rounded-xl px-3 py-2 text-sm font-medium transition";
 
 export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
+  const { t } = useTranslation();
   const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
   const buildApiUrl = (path: string) => (apiBaseUrl ? `${apiBaseUrl}${path}` : path);
 
@@ -169,10 +171,17 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const err = new Error(data?.error?.message || data?.message || "Server error") as Error & {
+      const err = new Error(data?.error?.message || data?.message || t("auth.messages.serverError")) as Error & {
         code?: string;
       };
-      err.code = data?.error?.code;
+      const message =
+        typeof data?.error === "string"
+          ? data.error
+          : data?.error?.message || data?.message || t("auth.messages.serverError");
+      err.message = message;
+      err.code =
+        data?.code ||
+        (typeof data?.error === "object" ? data?.error?.code : undefined);
       throw err;
     }
     return data;
@@ -189,17 +198,17 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
         password: loginPassword,
       });
       const token = data.token || data.accessToken;
-      if (!token) throw new Error("Missing auth token.");
+      if (!token) throw new Error(t("auth.messages.missingToken"));
       const authenticatedUser = {
         name: data.user?.name ?? "User",
         email: data.user?.email ?? normalizedEmail,
         token,
         role: data.user?.role ?? "user",
       };
-      setSuccess("Login successful!");
+      setSuccess(t("auth.messages.loginSuccess"));
       setTimeout(() => onAuthenticated(authenticatedUser), 700);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -209,7 +218,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
     e.preventDefault();
     clearFeedback();
     if (!registerCanSubmit) {
-      setError("Complete all password conditions and required fields.");
+      setError(t("auth.messages.completeFields"));
       return;
     }
     setLoading(true);
@@ -226,9 +235,9 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       setRegisterAttemptsLeft(OTP_MAX_ATTEMPTS);
       setRegisterResendSeconds(OTP_RESEND_SECONDS);
       setRegisterOtpExpiresAt(Date.now() + OTP_TTL_SECONDS * 1000);
-      setSuccess(typeof data?.message === "string" ? data.message : "Verification code sent successfully.");
+      setSuccess(typeof data?.message === "string" ? data.message : t("auth.messages.verificationSent"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -236,8 +245,8 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
 
   const handleRegisterVerify = async () => {
     clearFeedback();
-    if (registerOtp.length !== 6) return setError("Enter the 6-digit verification code.");
-    if (registerAttemptsLeft <= 0) return setError("Too many failed attempts. Resend a new code.");
+    if (registerOtp.length !== 6) return setError(t("auth.messages.enterCode"));
+    if (registerAttemptsLeft <= 0) return setError(t("auth.messages.tooManyAttempts"));
     setLoading(true);
     try {
       const data = await postJson("/api/auth/register/verify", {
@@ -247,20 +256,20 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
         otp: registerOtp,
       });
       const token = data.token || data.accessToken;
-      if (!token) throw new Error("Missing auth token.");
+      if (!token) throw new Error(t("auth.messages.missingToken"));
       const authenticatedUser = {
         name: data.user?.name ?? registerName,
         email: data.user?.email ?? registerEmail,
         token,
         role: data.user?.role ?? "user",
       };
-      setSuccess("Account verified successfully.");
+      setSuccess(t("auth.messages.accountVerified"));
       setTimeout(() => onAuthenticated(authenticatedUser), 700);
     } catch (err) {
       const code = err instanceof Error && "code" in err ? (err as { code?: string }).code : "";
       if (code === "INVALID_OTP") setRegisterAttemptsLeft((prev) => Math.max(0, prev - 1));
       if (code === "OTP_LOCKED") setRegisterAttemptsLeft(0);
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -282,9 +291,9 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       setRegisterAttemptsLeft(OTP_MAX_ATTEMPTS);
       setRegisterResendSeconds(OTP_RESEND_SECONDS);
       setRegisterOtpExpiresAt(Date.now() + OTP_TTL_SECONDS * 1000);
-      setSuccess(typeof data?.message === "string" ? data.message : "Verification code sent successfully.");
+      setSuccess(typeof data?.message === "string" ? data.message : t("auth.messages.verificationSent"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -294,7 +303,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
     e.preventDefault();
     clearFeedback();
     if (!resetCanSubmit) {
-      setError("Complete all password conditions and required fields.");
+      setError(t("auth.messages.completeFields"));
       return;
     }
     setLoading(true);
@@ -309,9 +318,9 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       setResetAttemptsLeft(OTP_MAX_ATTEMPTS);
       setResetResendSeconds(OTP_RESEND_SECONDS);
       setResetOtpExpiresAt(Date.now() + OTP_TTL_SECONDS * 1000);
-      setSuccess(typeof data?.message === "string" ? data.message : "Verification code sent successfully.");
+      setSuccess(typeof data?.message === "string" ? data.message : t("auth.messages.verificationSent"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -319,8 +328,8 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
 
   const handleResetVerify = async () => {
     clearFeedback();
-    if (resetOtp.length !== 6) return setError("Enter the 6-digit verification code.");
-    if (resetAttemptsLeft <= 0) return setError("Too many failed attempts. Resend a new code.");
+    if (resetOtp.length !== 6) return setError(t("auth.messages.enterCode"));
+    if (resetAttemptsLeft <= 0) return setError(t("auth.messages.tooManyAttempts"));
     setLoading(true);
     try {
       await postJson("/api/auth/password-reset/verify", {
@@ -330,7 +339,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
         otp: resetOtp,
         newPassword: resetPassword,
       });
-      setSuccess("Password updated successfully. Sign in with your new password.");
+      setSuccess(t("auth.messages.passwordUpdated"));
       setResetStep("form");
       setResetOtp("");
       setActiveTab("login");
@@ -338,7 +347,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       const code = err instanceof Error && "code" in err ? (err as { code?: string }).code : "";
       if (code === "INVALID_OTP") setResetAttemptsLeft((prev) => Math.max(0, prev - 1));
       if (code === "OTP_LOCKED") setResetAttemptsLeft(0);
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
@@ -358,21 +367,21 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       setResetAttemptsLeft(OTP_MAX_ATTEMPTS);
       setResetResendSeconds(OTP_RESEND_SECONDS);
       setResetOtpExpiresAt(Date.now() + OTP_TTL_SECONDS * 1000);
-      setSuccess(typeof data?.message === "string" ? data.message : "Verification code sent successfully.");
+      setSuccess(typeof data?.message === "string" ? data.message : t("auth.messages.verificationSent"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Server error");
+      setError(err instanceof Error ? err.message : t("auth.messages.serverError"));
     } finally {
       setLoading(false);
     }
   };
 
-  const headingText = activeTab === "register" ? "Create Account" : activeTab === "reset" ? "Reset Password" : "Log In";
+  const headingText = activeTab === "register" ? t("auth.registerTitle") : activeTab === "reset" ? t("auth.resetTitle") : t("auth.loginTitle");
   const subtitleText =
     activeTab === "register"
-      ? "Create your account and verify it in a single streamlined flow."
+      ? t("auth.registerSubtitle")
       : activeTab === "reset"
-        ? "Reset your password with a compact verification step."
-        : "Welcome back. Sign in to continue where you left off.";
+        ? t("auth.resetSubtitle")
+        : t("auth.loginSubtitle");
 
   const renderAlert = () => (
     <>
@@ -394,14 +403,14 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   const renderPasswordRules = (rules: Record<string, boolean>) => (
       <div className="rounded-2xl border border-border/70 p-3" style={{ backgroundColor: "var(--focus-light)" }}>
         <div className="mb-2 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Password checks</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{t("auth.passwordChecks")}</p>
         <span className="text-xs text-muted-foreground">{Object.values(rules).filter(Boolean).length}/{PASSWORD_RULES.length}</span>
       </div>
       <div className="grid gap-x-3 gap-y-1.5 sm:grid-cols-2">
         {PASSWORD_RULES.map((rule) => (
           <div key={rule.key} className={`flex items-center gap-2 text-xs ${rules[rule.key] ? "text-foreground" : "text-muted-foreground"}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${rules[rule.key] ? "bg-[var(--focus-primary)]" : "bg-[var(--break-secondary)]"}`} />
-            <span>{rule.label}</span>
+            <span>{t(rule.translationKey)}</span>
           </div>
         ))}
       </div>
@@ -421,9 +430,9 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   ) => (
     <div className="space-y-4">
       <div className="space-y-1 text-center">
-        <h3 className="text-lg font-semibold text-foreground">Enter verification code</h3>
+        <h3 className="text-lg font-semibold text-foreground">{t("auth.verificationCodeTitle")}</h3>
         <p className="text-sm leading-6 text-muted-foreground">
-          {helperText} Expires in {Math.floor(expiresIn / 60)}:{String(expiresIn % 60).padStart(2, "0")}.
+          {helperText} {t("auth.otpExpiresIn")} {Math.floor(expiresIn / 60)}:{String(expiresIn % 60).padStart(2, "0")}.
         </p>
       </div>
       <div className="rounded-2xl border border-border/70 p-4" style={{ backgroundColor: "var(--focus-light)" }}>
@@ -444,8 +453,8 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
           </InputOTPGroup>
         </InputOTP>
         <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Attempts left: {attemptsLeft}</span>
-          <span>{resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Ready to resend"}</span>
+          <span>{t("auth.attemptsLeft", { count: attemptsLeft })}</span>
+          <span>{resendSeconds > 0 ? t("auth.resendIn", { seconds: resendSeconds }) : t("auth.readyToResend")}</span>
         </div>
       </div>
       <Button
@@ -454,14 +463,14 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
         onClick={onVerify}
         disabled={loading || otpValue.length !== 6 || attemptsLeft <= 0 || expiresIn <= 0}
       >
-        {loading ? "Verifying..." : "Verify Code"}
+        {loading ? t("auth.verifying") : t("auth.verifyCodeButton")}
       </Button>
       <div className="flex items-center justify-between text-sm">
         <button type="button" className="font-medium text-muted-foreground hover:text-foreground disabled:opacity-50" onClick={onBackClick} disabled={loading}>
-          Back
+          {t("auth.back")}
         </button>
         <button type="button" className="font-medium disabled:opacity-50" style={{ color: "var(--focus-primary)" }} onClick={onResendClick} disabled={loading || resendSeconds > 0}>
-          {resendSeconds > 0 ? `Resend code in ${resendSeconds}s` : "Resend code"}
+          {resendSeconds > 0 ? t("auth.resendCodeIn", { seconds: resendSeconds }) : t("auth.resendCode")}
         </button>
       </div>
     </div>
@@ -484,7 +493,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
           <span className="flex h-10 w-10 items-center justify-center rounded-2xl" style={{ backgroundColor: "var(--focus-light)", color: "var(--focus-primary)" }}>
             <BookOpen className="h-5 w-5" />
           </span>
-          <span className="text-base font-semibold tracking-tight text-foreground">Focus Space</span>
+          <span className="text-base font-semibold tracking-tight text-foreground">{t("app.brand")}</span>
         </button>
 
         <Card className="overflow-hidden rounded-[28px] border border-white/80 bg-white/95 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
@@ -506,7 +515,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                       clearFeedback();
                     }}
                   >
-                    {tab === "login" ? "Sign in" : tab === "register" ? "Sign up" : "Reset"}
+                    {tab === "login" ? t("auth.tabs.login") : tab === "register" ? t("auth.tabs.register") : t("auth.tabs.reset")}
                   </button>
                 ))}
               </div>
@@ -521,7 +530,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                       clearFeedback();
                     }}
                   >
-                    {activeTab === "login" ? "Forgot password?" : "Back to sign in"}
+                    {activeTab === "login" ? t("auth.forgotPassword") : t("auth.backToSignIn")}
                   </button>
                 </div>
               )}
@@ -533,25 +542,25 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="login-email" className="text-sm font-medium text-slate-700">Email</Label>
+                    <Label htmlFor="login-email" className="text-sm font-medium text-slate-700">{t("auth.email")}</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="login-email" type="email" placeholder="you@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
+                      <Input id="login-email" type="email" placeholder={t("auth.emailPlaceholder")} value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="login-password" className="text-sm font-medium text-slate-700">Password</Label>
+                    <Label htmlFor="login-password" className="text-sm font-medium text-slate-700">{t("auth.password")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="login-password" type={showLoginPassword ? "text" : "password"} placeholder="Enter your password" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showLoginPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowLoginPassword((prev) => !prev)}>
+                      <Input id="login-password" type={showLoginPassword ? "text" : "password"} placeholder={t("auth.passwordPlaceholder")} value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
+                      <button type="button" aria-label={showLoginPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowLoginPassword((prev) => !prev)}>
                         {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                   </div>
                 </div>
                 <Button type="submit" className={primaryButtonClassName} disabled={loading}>
-                  {loading ? "Signing in..." : "Sign In"}
+                  {loading ? t("auth.signingIn") : t("auth.signInButton")}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </form>
@@ -561,45 +570,45 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
               <form onSubmit={handleRegisterInitiate} className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="register-name" className="text-sm font-medium text-slate-700">Full name</Label>
+                    <Label htmlFor="register-name" className="text-sm font-medium text-slate-700">{t("auth.fullName")}</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-name" type="text" placeholder="John Doe" value={registerName} onChange={(e) => setRegisterName(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
+                      <Input id="register-name" type="text" placeholder={t("auth.fullNamePlaceholder")} value={registerName} onChange={(e) => setRegisterName(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="register-email" className="text-sm font-medium text-slate-700">Email</Label>
+                    <Label htmlFor="register-email" className="text-sm font-medium text-slate-700">{t("auth.email")}</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-email" type="email" placeholder="you@example.com" value={registerEmail} onChange={(e) => setRegisterEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
+                      <Input id="register-email" type="email" placeholder={t("auth.emailPlaceholder")} value={registerEmail} onChange={(e) => setRegisterEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">
                     <div className="flex items-center justify-between">
-                      <Label htmlFor="register-phone" className="text-sm font-medium text-slate-700">Phone</Label>
-                      <span className="text-xs text-slate-400">Required only for SMS</span>
+                      <Label htmlFor="register-phone" className="text-sm font-medium text-slate-700">{t("auth.phone")}</Label>
+                      <span className="text-xs text-slate-400">{t("auth.messages.smsPhoneHint")}</span>
                     </div>
                     <div className="relative">
                       <Smartphone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-phone" type="tel" placeholder="+1 555 123 4567" value={registerPhone} onChange={(e) => setRegisterPhone(e.target.value)} disabled={loading} className={fieldWithLeadingIconClassName} />
+                      <Input id="register-phone" type="tel" placeholder={t("auth.phonePlaceholder")} value={registerPhone} onChange={(e) => setRegisterPhone(e.target.value)} disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="register-password" className="text-sm font-medium text-slate-700">Password</Label>
+                    <Label htmlFor="register-password" className="text-sm font-medium text-slate-700">{t("auth.password")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-password" type={showRegisterPassword ? "text" : "password"} placeholder="Create password" value={registerPassword} onChange={(e) => setRegisterPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showRegisterPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowRegisterPassword((prev) => !prev)}>
+                      <Input id="register-password" type={showRegisterPassword ? "text" : "password"} placeholder={t("auth.createPasswordPlaceholder")} value={registerPassword} onChange={(e) => setRegisterPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
+                      <button type="button" aria-label={showRegisterPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowRegisterPassword((prev) => !prev)}>
                         {showRegisterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="register-confirm-password" className="text-sm font-medium text-slate-700">Confirm password</Label>
+                    <Label htmlFor="register-confirm-password" className="text-sm font-medium text-slate-700">{t("auth.confirmPassword")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-confirm-password" type={showRegisterConfirmPassword ? "text" : "password"} placeholder="Repeat password" value={registerConfirmPassword} onChange={(e) => setRegisterConfirmPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showRegisterConfirmPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowRegisterConfirmPassword((prev) => !prev)}>
+                      <Input id="register-confirm-password" type={showRegisterConfirmPassword ? "text" : "password"} placeholder={t("auth.repeatPasswordPlaceholder")} value={registerConfirmPassword} onChange={(e) => setRegisterConfirmPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
+                      <button type="button" aria-label={showRegisterConfirmPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowRegisterConfirmPassword((prev) => !prev)}>
                         {showRegisterConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
@@ -607,14 +616,14 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                 </div>
                 {renderPasswordRules(registerRules)}
                 <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-700">Verification method</Label>
+                  <Label className="text-sm font-medium text-slate-700">{t("auth.verificationMethod")}</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <Button type="button" variant="outline" className={registerMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setRegisterMethod("email")} disabled={loading}>Email</Button>
-                    <Button type="button" variant="outline" className={registerMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setRegisterMethod("sms")} disabled={loading}>SMS</Button>
+                    <Button type="button" variant="outline" className={registerMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setRegisterMethod("email")} disabled={loading}>{t("auth.emailMethod")}</Button>
+                    <Button type="button" variant="outline" className={registerMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setRegisterMethod("sms")} disabled={loading}>{t("auth.smsMethod")}</Button>
                   </div>
                 </div>
                 <Button type="submit" className={primaryButtonClassName} disabled={loading || !registerCanSubmit}>
-                  {loading ? "Submitting..." : "Create Account"}
+                  {loading ? t("auth.submitting") : t("auth.createAccountButton")}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </form>
@@ -628,7 +637,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                 registerExpiresIn,
                 registerAttemptsLeft,
                 registerResendSeconds,
-                `A 6-digit code was sent via ${registerMethod.toUpperCase()}.`,
+                t("auth.codeSentVia", { method: registerMethod.toUpperCase() }),
                 handleRegisterVerify,
                 () => {
                   setRegisterStep("form");
@@ -640,43 +649,43 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
             {activeTab === "reset" && resetStep === "form" && (
               <form onSubmit={handleResetRequest} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-700">Verification method</Label>
+                  <Label className="text-sm font-medium text-slate-700">{t("auth.verificationMethod")}</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    <Button type="button" variant="outline" className={resetMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={resetMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setResetMethod("email")} disabled={loading}>Email</Button>
-                    <Button type="button" variant="outline" className={resetMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={resetMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setResetMethod("sms")} disabled={loading}>SMS</Button>
+                    <Button type="button" variant="outline" className={resetMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={resetMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setResetMethod("email")} disabled={loading}>{t("auth.emailMethod")}</Button>
+                    <Button type="button" variant="outline" className={resetMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={resetMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setResetMethod("sms")} disabled={loading}>{t("auth.smsMethod")}</Button>
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="reset-email" className="text-sm font-medium text-slate-700">Email</Label>
+                    <Label htmlFor="reset-email" className="text-sm font-medium text-slate-700">{t("auth.email")}</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="reset-email" type="email" placeholder="you@example.com" value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} disabled={loading || resetMethod !== "email"} required={resetMethod === "email"} className={fieldWithLeadingIconClassName} />
+                      <Input id="reset-email" type="email" placeholder={t("auth.emailPlaceholder")} value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} disabled={loading || resetMethod !== "email"} required={resetMethod === "email"} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="reset-phone" className="text-sm font-medium text-slate-700">Phone</Label>
+                    <Label htmlFor="reset-phone" className="text-sm font-medium text-slate-700">{t("auth.phone")}</Label>
                     <div className="relative">
                       <Smartphone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="reset-phone" type="tel" placeholder="+1 555 123 4567" value={resetPhone} onChange={(e) => setResetPhone(e.target.value)} disabled={loading || resetMethod !== "sms"} required={resetMethod === "sms"} className={fieldWithLeadingIconClassName} />
+                      <Input id="reset-phone" type="tel" placeholder={t("auth.phonePlaceholder")} value={resetPhone} onChange={(e) => setResetPhone(e.target.value)} disabled={loading || resetMethod !== "sms"} required={resetMethod === "sms"} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="reset-password" className="text-sm font-medium text-slate-700">New password</Label>
+                    <Label htmlFor="reset-password" className="text-sm font-medium text-slate-700">{t("auth.newPassword")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="reset-password" type={showResetPassword ? "text" : "password"} placeholder="Create password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showResetPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowResetPassword((prev) => !prev)}>
+                      <Input id="reset-password" type={showResetPassword ? "text" : "password"} placeholder={t("auth.createPasswordPlaceholder")} value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
+                      <button type="button" aria-label={showResetPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowResetPassword((prev) => !prev)}>
                         {showResetPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="reset-confirm-password" className="text-sm font-medium text-slate-700">Confirm password</Label>
+                    <Label htmlFor="reset-confirm-password" className="text-sm font-medium text-slate-700">{t("auth.confirmPassword")}</Label>
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="reset-confirm-password" type={showResetConfirmPassword ? "text" : "password"} placeholder="Repeat password" value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showResetConfirmPassword ? "Hide password" : "Show password"} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowResetConfirmPassword((prev) => !prev)}>
+                      <Input id="reset-confirm-password" type={showResetConfirmPassword ? "text" : "password"} placeholder={t("auth.repeatPasswordPlaceholder")} value={resetConfirmPassword} onChange={(e) => setResetConfirmPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
+                      <button type="button" aria-label={showResetConfirmPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowResetConfirmPassword((prev) => !prev)}>
                         {showResetConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
@@ -684,7 +693,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                 </div>
                 {renderPasswordRules(resetRules)}
                 <Button type="submit" className={primaryButtonClassName} disabled={loading || !resetCanSubmit}>
-                  {loading ? "Submitting..." : "Send Verification Code"}
+                  {loading ? t("auth.submitting") : t("auth.sendCodeButton")}
                 </Button>
               </form>
             )}
@@ -697,7 +706,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                 resetExpiresIn,
                 resetAttemptsLeft,
                 resetResendSeconds,
-                resetMethod === "email" ? "Use the 6-digit code from your email." : "Use the 6-digit code sent to your phone.",
+                resetMethod === "email" ? t("auth.emailOtpHint") : t("auth.smsOtpHint"),
                 handleResetVerify,
                 () => {
                   setResetStep("form");

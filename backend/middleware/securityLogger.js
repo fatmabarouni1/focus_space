@@ -1,10 +1,11 @@
-// Basic security logging: IP, action, timestamp.
-const securityLogger = (req, res, next) => {
-  const timestamp = new Date().toISOString();
-  const action = `${req.method} ${req.originalUrl}`;
-  const ip = req.ip;
+import logger from "../utils/logger.js";
 
-  console.log(`[SECURITY] ${timestamp} | ${ip} | ${action}`);
+const securityLogger = (req, res, next) => {
+  logger.info("Security request log", {
+    ip: req.ip,
+    action: `${req.method} ${req.originalUrl}`,
+    requestId: req.requestId,
+  });
   next();
 };
 

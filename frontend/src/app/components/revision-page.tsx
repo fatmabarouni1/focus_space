@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { BookOpen } from 'lucide-react';
-import { fetchModules, createModule, deleteModule, type RevisionModule } from '@/app/api/revision';
+import { createModule, deleteModule } from '@/app/api/revision';
 import { PageHeader } from '@/app/components/page-header';
 import { CreateModuleModal } from '@/app/components/create-module-modal';
 import { ModuleCard } from '@/app/components/module-card';
@@ -8,6 +8,7 @@ import { EmptyState } from '@/app/components/empty-state';
 import { SkeletonLoader } from '@/app/components/skeleton-loader';
 import { PrimaryButton } from '@/app/components/button-kit';
 import { SearchInput } from '@/app/components/search-input';
+import { useModules } from '@/app/hooks/useModules';
 
 interface RevisionPageProps {
   authToken: string;
@@ -15,31 +16,20 @@ interface RevisionPageProps {
 }
 
 export function RevisionPage({ authToken, onOpenModule }: RevisionPageProps) {
-  const [modules, setModules] = useState<RevisionModule[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-
-  useEffect(() => {
-    loadModules();
-  }, [authToken]);
-
-  const loadModules = async () => {
-    if (!authToken) return;
-    setLoading(true);
-    setError('');
-    try {
-      const data = await fetchModules(authToken);
-      setModules(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load modules.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const {
+    modules,
+    hasMore,
+    isLoading,
+    error,
+    loadMore,
+    prependModule,
+    removeModule,
+  } = useModules(authToken);
 
   const filteredModules = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -55,12 +45,13 @@ export function RevisionPage({ authToken, onOpenModule }: RevisionPageProps) {
     if (!authToken) return;
     setCreating(true);
     setCreateError('');
+    setActionError('');
     try {
       const created = await createModule(authToken, {
         title,
         description,
       });
-      setModules((prev) => [created, ...prev]);
+      prependModule(created);
       setIsCreateOpen(false);
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create module.');
@@ -71,12 +62,12 @@ export function RevisionPage({ authToken, onOpenModule }: RevisionPageProps) {
 
   const handleDelete = async (moduleId: string) => {
     if (!authToken) return;
-    setError('');
+    setActionError('');
     try {
       await deleteModule(authToken, moduleId);
-      setModules((prev) => prev.filter((module) => module._id !== moduleId));
+      removeModule(moduleId);
     } catch (err: any) {
-      setError(err.message || 'Failed to delete module.');
+      setActionError(err.message || 'Failed to delete module.');
     }
   };
 
@@ -100,9 +91,9 @@ export function RevisionPage({ authToken, onOpenModule }: RevisionPageProps) {
         }
       />
 
-      {error ? <div className="text-sm text-destructive">{error}</div> : null}
+      {error || actionError ? <div className="text-sm text-destructive">{error || actionError}</div> : null}
 
-      {loading ? (
+      {isLoading && modules.length === 0 ? (
         <SkeletonLoader />
       ) : modules.length === 0 ? (
         <EmptyState
@@ -134,6 +125,14 @@ export function RevisionPage({ authToken, onOpenModule }: RevisionPageProps) {
           ))}
         </div>
       )}
+
+      {hasMore && filteredModules.length > 0 ? (
+        <div className="flex justify-center">
+          <PrimaryButton onClick={() => void loadMore()} disabled={isLoading}>
+            {isLoading ? 'Loading...' : 'Load more'}
+          </PrimaryButton>
+        </div>
+      ) : null}
 
       <CreateModuleModal
         open={isCreateOpen}

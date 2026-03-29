@@ -42,7 +42,7 @@ export async function fetchRooms(token: string) {
   }
 
   const data = await response.json();
-  return data.rooms as RoomListItem[];
+  return (data.data ?? data.rooms ?? []) as RoomListItem[];
 }
 
 export async function fetchRoom(token: string, roomId: string) {

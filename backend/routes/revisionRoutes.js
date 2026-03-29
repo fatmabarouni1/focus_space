@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import authMiddleware from "../middleware/authMiddleware.js";
+import paginateMiddleware from "../middleware/paginateMiddleware.js";
 import validate from "../middleware/validate.js";
 import {
   ensureUploadsDir,
@@ -13,6 +14,7 @@ import {
   uploadDocument,
   deleteDocument,
   getNote,
+  listResources,
   saveNote,
   listLinks,
   createLink,
@@ -25,7 +27,7 @@ ensureUploadsDir();
 const upload = multer({ dest: "uploads/" });
 const router = express.Router();
 
-router.get("/modules", authMiddleware, listModules);
+router.get("/modules", authMiddleware, paginateMiddleware("cursor"), listModules);
 router.post(
   "/modules",
   authMiddleware,
@@ -57,6 +59,7 @@ router.delete(
 router.get(
   "/modules/:moduleId/documents",
   authMiddleware,
+  paginateMiddleware("cursor"),
   validate({ params: moduleSchemas.moduleIdParams }),
   listDocuments
 );
@@ -77,8 +80,16 @@ router.delete(
 router.get(
   "/modules/:moduleId/notes",
   authMiddleware,
+  paginateMiddleware("cursor"),
   validate({ params: moduleSchemas.moduleIdParams }),
   getNote
+);
+router.get(
+  "/modules/:moduleId/resources",
+  authMiddleware,
+  paginateMiddleware("cursor"),
+  validate({ params: moduleSchemas.moduleIdParams }),
+  listResources
 );
 router.put(
   "/modules/:moduleId/notes",

@@ -2,6 +2,7 @@ import StudySession from "../models/StudySession.js";
 import SessionParticipant from "../models/SessionParticipant.js";
 import User from "../models/User.js";
 import { sendError } from "../utils/errors.js";
+import { paginateCursor } from "../utils/paginate.js";
 
 const getTimeZone = (req) => {
   const headerTz = req.headers["x-timezone"];
@@ -34,6 +35,19 @@ const getDateParts = (date, timeZone) => {
 
 const toUtcDayDate = (parts) =>
   new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+
+const listSessions = async (req, res) => {
+  const result = await paginateCursor({
+    model: StudySession,
+    filter: { created_by: req.user.id },
+    limit: req.pagination?.limit,
+    cursor: req.pagination?.cursor,
+    sortField: "_id",
+    sortOrder: -1,
+  });
+
+  return res.json(result);
+};
 
 // Create a new study session (solo or group).
 const createSession = async (req, res) => {
@@ -181,4 +195,4 @@ const leaveSession = async (req, res) => {
   return res.json({ message: "Left session successfully." });
 };
 
-export { createSession, joinSession, leaveSession, completeSession };
+export { listSessions, createSession, joinSession, leaveSession, completeSession };

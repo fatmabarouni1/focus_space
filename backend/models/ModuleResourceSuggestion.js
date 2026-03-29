@@ -32,4 +32,7 @@ const moduleResourceSuggestionSchema = new mongoose.Schema(
   { versionKey: false }
 );
 
+moduleResourceSuggestionSchema.index({ moduleId: 1, createdAt: -1 }, { background: true });
+moduleResourceSuggestionSchema.index({ userId: 1, moduleId: 1, createdAt: -1 }, { background: true });
+
 export default mongoose.model("ModuleResourceSuggestion", moduleResourceSuggestionSchema);
