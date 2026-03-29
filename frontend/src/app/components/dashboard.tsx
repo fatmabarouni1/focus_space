@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StudyTimer } from '@/app/components/study-timer';
 import { StudyRoom } from '@/app/components/study-room';
-import { fetchSuggestions, type Suggestion } from '@/app/api/suggestions';
 import { fetchDashboard, useFreezeToken, type DashboardPayload } from '@/app/api/dashboard';
 import { completeSession } from '@/app/api/sessions';
 import { BaseCard } from '@/app/components/base-card';
@@ -15,7 +14,6 @@ import {
   Clock,
   Sparkles,
   Target,
-  TrendingUp,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -42,22 +40,11 @@ export function Dashboard({
   const { t } = useTranslation();
   const [dashboardData, setDashboardData] = useState<DashboardPayload | null>(null);
   const [dashboardError, setDashboardError] = useState("");
-  const [courseSuggestions, setCourseSuggestions] = useState<Suggestion[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [suggestionError, setSuggestionError] = useState("");
   const { mode, setMode, soundEnabled, setSoundEnabled } = usePomodoro();
   const { activeSoundId, playSound, stopSound } = useFocusAudio();
 
   useEffect(() => {
     loadDashboard();
-  }, [authToken]);
-
-  useEffect(() => {
-    if (authToken) {
-      loadCourseSuggestions();
-    } else {
-      setCourseSuggestions([]);
-    }
   }, [authToken]);
 
   const loadDashboard = async () => {
@@ -92,19 +79,6 @@ export function Dashboard({
       setDashboardData((prev) => (prev ? { ...prev, streaks: updatedStreaks } : prev));
     } catch (error: any) {
       setDashboardError(error.message || t('dashboard.suggestionsUnavailable'));
-    }
-  };
-
-  const loadCourseSuggestions = async () => {
-    setLoadingSuggestions(true);
-    setSuggestionError("");
-    try {
-      const suggestions = await fetchSuggestions(authToken);
-      setCourseSuggestions(suggestions);
-    } catch (error: any) {
-      setSuggestionError(error.message || t('dashboard.suggestionsUnavailable'));
-    } finally {
-      setLoadingSuggestions(false);
     }
   };
 
@@ -143,7 +117,6 @@ export function Dashboard({
   const targets = dashboardData?.targets;
   const streaks = dashboardData?.streaks;
 
-  const suggestionPreview = courseSuggestions[0];
   const sessionsToday = stats?.sessionsToday ?? 0;
   const sessionsTarget = targets?.dailySessionsTarget ?? 0;
   const focusMinutesToday = stats?.focusMinutesToday ?? 0;
@@ -332,77 +305,6 @@ export function Dashboard({
             </div>
 
             <StudyRoom authToken={authToken} onOpenRooms={onOpenRooms} onJoinRoom={onJoinRoom} />
-
-            <BaseCard className="rounded-[28px] border border-border/70 p-5 shadow-[0_14px_36px_rgba(15,23,42,0.05)]">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[var(--focus-light)]">
-                    <TrendingUp className="h-4 w-4" style={{ color: 'var(--focus-primary)' }} />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-semibold">{t('dashboard.aiSuggestion')}</h3>
-                    <p className="text-xs text-muted-foreground">{t('dashboard.aiSuggestionSubtitle')}</p>
-                  </div>
-                </div>
-                <SecondaryButton
-                  size="sm"
-                variant="ghost"
-                onClick={loadCourseSuggestions}
-                disabled={loadingSuggestions}
-              >
-                {loadingSuggestions ? t('common.loading') : t('common.refresh')}
-              </SecondaryButton>
-            </div>
-
-              {suggestionError ? (
-                <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-                  <div className="font-medium text-foreground">{t('dashboard.suggestionsUnavailable')}</div>
-                  <div className="mt-1">{suggestionError}</div>
-                  <div className="mt-3">
-                    <SecondaryButton size="sm" onClick={loadCourseSuggestions} disabled={loadingSuggestions}>
-                      {t('common.tryAgain')}
-                    </SecondaryButton>
-                  </div>
-                </div>
-              ) : suggestionPreview ? (
-                <div className="rounded-[24px] border border-border/70 bg-muted/20 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">{suggestionPreview.title}</div>
-                      {suggestionPreview.description ? (
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{suggestionPreview.description}</p>
-                      ) : (
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                          {t('dashboard.noSuggestionDescription')}
-                        </p>
-                      )}
-                    </div>
-                    {suggestionPreview.level ? (
-                      <Pill className="bg-background text-muted-foreground">
-                        {suggestionPreview.level}
-                      </Pill>
-                    ) : null}
-                  </div>
-                  <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {t('dashboard.freshGuidance')}
-                  </div>
-                </div>
-              ) : loadingSuggestions ? (
-                <div className="rounded-[24px] border border-border/70 bg-muted/20 p-4">
-                  <div className="animate-pulse space-y-3">
-                    <div className="h-4 w-1/2 rounded bg-muted" />
-                    <div className="h-3 rounded bg-muted" />
-                    <div className="h-3 w-4/5 rounded bg-muted" />
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-[24px] border border-dashed border-border/70 bg-muted/15 px-4 py-5 text-sm text-muted-foreground">
-                  <div className="font-medium text-foreground">No AI suggestion yet</div>
-                  <p className="mt-1">Refresh to get a smart next-step recommendation based on your current progress.</p>
-                </div>
-              )}
-            </BaseCard>
           </div>
         </div>
     </div>
