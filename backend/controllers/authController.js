@@ -12,6 +12,7 @@ import { hasSmtpConfig, sendOtpEmail } from "../utils/mailer.js";
 const ACCESS_TOKEN_TTL = config.jwt.expiresIn;
 const REFRESH_TOKEN_TTL_DAYS = config.jwt.refreshTtlDays;
 const isProduction = config.env === "production";
+const isDemoMode = String(process.env.DEMO_MODE || "").toLowerCase() === "true";
 const allowLocalOtpLog =
   !isProduction &&
   (process.env.ALLOW_LOCAL_OTP_LOG || "").toLowerCase() === "true";
@@ -74,6 +75,15 @@ const logOtpForLocalDebug = ({ purpose, destination, code }) => {
   logger.debug(`[OTP:${purpose}] -> ${destination}: ${code}`);
 };
 
+const logOtpForDemo = ({ purpose, method, destination, code }) => {
+  logger.info("Demo OTP generated", {
+    purpose,
+    method,
+    destination,
+    code,
+  });
+};
+
 const logAuthEvent = (req, event, userId = null, extra = {}) => {
   logger.info("Auth event", {
     event,
@@ -89,14 +99,35 @@ const sendOtpCode = async ({ method, email, phone, code, purpose }) => {
 
   if (method === "email") {
     if (!hasSmtpConfig()) {
+      if (isDemoMode) {
+        logOtpForDemo({ purpose, method, destination: email, code });
+        return { deliveryMode: "demo_log" };
+      }
       throw new Error("Email verification is not configured on the server.");
     }
-    await sendOtpEmail({ email, code, purpose });
-    return;
+    try {
+      await sendOtpEmail({ email, code, purpose });
+      return { deliveryMode: "email" };
+    } catch (error) {
+      if (isDemoMode) {
+        logger.warn("SMTP delivery failed; falling back to demo OTP log", {
+          purpose,
+          email,
+          error: error?.message,
+        });
+        logOtpForDemo({ purpose, method, destination: email, code });
+        return { deliveryMode: "demo_log" };
+      }
+      throw error;
+    }
   }
 
   // SMS remains a development placeholder until a provider is integrated.
   logOtpForLocalDebug({ purpose, destination: `${method.toUpperCase()} ${destination}`, code });
+  if (isDemoMode) {
+    logOtpForDemo({ purpose, method, destination, code });
+  }
+  return { deliveryMode: "sms_placeholder" };
 };
 
 const setRefreshCookie = (res, token) => {
@@ -148,6 +179,11 @@ const issueAuthTokens = async (res, user) => {
   return accessToken;
 };
 
+const createDemoOtpMessage = (purpose) =>
+  purpose === "register"
+    ? "Demo mode: verification code logged in backend logs."
+    : "Demo mode: password reset code logged in backend logs.";
+
 const createOrReplaceOtpChallenge = async ({
   purpose,
   method,
@@ -182,15 +218,29 @@ const createOrReplaceOtpChallenge = async ({
   });
 
   try {
-    await sendOtpCode({ method, email: query.email, phone: query.phone, code: otp, purpose });
+    const delivery = await sendOtpCode({
+      method,
+      email: query.email,
+      phone: query.phone,
+      code: otp,
+      purpose,
+    });
     debugOtp("OTP saved and delivery completed", {
       purpose,
       method,
       email: query.email,
       phone: query.phone,
       challengeId: challenge._id.toString(),
+      deliveryMode: delivery?.deliveryMode,
     });
-    return challenge;
+    return {
+      challenge,
+      deliveryMode: delivery?.deliveryMode || "unknown",
+      message:
+        delivery?.deliveryMode === "demo_log"
+          ? createDemoOtpMessage(purpose)
+          : "Verification code sent successfully",
+    };
   } catch (error) {
     debugOtp("OTP delivery failed; challenge removed", {
       purpose,
@@ -317,7 +367,7 @@ const register = async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    await createOrReplaceOtpChallenge({
+    const otpResult = await createOrReplaceOtpChallenge({
       purpose: "register",
       method: "email",
       email: email.toLowerCase(),
@@ -330,9 +380,7 @@ const register = async (req, res) => {
       },
     });
 
-    return res.status(202).json(
-      buildSecureOtpResponse("Verification code sent successfully")
-    );
+    return res.status(202).json(buildSecureOtpResponse(otpResult.message));
   } catch (error) {
     logger.error("register error", {
       requestId: req.requestId,
@@ -358,7 +406,7 @@ const registerInitiate = async (req, res) => {
     if (!isStrongPassword(password)) {
       return sendError(res, 400, "VALIDATION_ERROR", "Password does not meet complexity requirements.");
     }
-    if (method === "email" && !hasSmtpConfig()) {
+    if (method === "email" && !hasSmtpConfig() && !isDemoMode) {
       return sendError(
         res,
         503,
@@ -373,7 +421,7 @@ const registerInitiate = async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    await createOrReplaceOtpChallenge({
+    const otpResult = await createOrReplaceOtpChallenge({
       purpose: "register",
       method,
       ...contact,
@@ -385,7 +433,7 @@ const registerInitiate = async (req, res) => {
       },
     });
 
-    return res.json(buildSecureOtpResponse("Verification code sent successfully"));
+    return res.json(buildSecureOtpResponse(otpResult.message));
   } catch (error) {
     logger.error("registerInitiate error", {
       requestId: req.requestId,
@@ -573,7 +621,7 @@ const requestPasswordReset = async (req, res) => {
       return sendError(res, 400, "VALIDATION_ERROR", "Phone number is required for SMS verification.");
     }
 
-    if (method === "email" && !hasSmtpConfig()) {
+    if (method === "email" && !hasSmtpConfig() && !isDemoMode) {
       return sendError(
         res,
         503,
@@ -589,14 +637,14 @@ const requestPasswordReset = async (req, res) => {
       return sendError(res, 404, "ACCOUNT_NOT_FOUND", "No account matches the provided details.");
     }
 
-    await createOrReplaceOtpChallenge({
+    const otpResult = await createOrReplaceOtpChallenge({
       purpose: "password_reset",
       method,
       ...contact,
       pendingData: { userId: user._id.toString() },
     });
 
-    return res.json(buildSecureOtpResponse("Verification code sent successfully"));
+    return res.json(buildSecureOtpResponse(otpResult.message));
   } catch (error) {
     logger.error("requestPasswordReset error", {
       requestId: req.requestId,
