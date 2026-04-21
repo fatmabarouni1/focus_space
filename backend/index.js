@@ -20,6 +20,15 @@ const allowedOriginPatterns = [
 ];
 
 const isAllowedOrigin = (origin) => {
+  console.log("=== CORS DEBUG ===");
+  console.log("Origin recu:", JSON.stringify(origin));
+  console.log("clientOrigins:", JSON.stringify(clientOrigins));
+  console.log("Match clientOrigins:", clientOrigins.includes(origin));
+  console.log(
+    "Match pattern:",
+    allowedOriginPatterns.some((pattern) => pattern.test(origin))
+  );
+
   if (!origin) {
     return true;
   }
