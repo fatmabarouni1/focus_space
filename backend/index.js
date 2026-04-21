@@ -14,6 +14,36 @@ const app = express();
 const PORT = config.port;
 const clientOrigins = config.app.clientOrigins;
 const uploadsPath = fileURLToPath(new URL("./uploads", import.meta.url));
+const allowedOriginPatterns = [
+  /^http:\/\/localhost:5173$/,
+  /^https:\/\/studypal-frontend(?:-[a-z0-9]+)?\.onrender\.com$/,
+];
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (clientOrigins.includes(origin)) {
+    return true;
+  }
+
+  return allowedOriginPatterns.some((pattern) => pattern.test(origin));
+};
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
 const maskMongoUri = (value) => {
   if (!value) return "";
   return value.replace(/(mongodb(?:\+srv)?:\/\/)([^@/]+)@/i, "$1***:***@");
@@ -63,12 +93,8 @@ const bootstrap = async () => {
   const requireAuth = authMiddlewareModule.default;
   const { requireRole } = authMiddlewareModule;
 
-  app.use(
-    cors({
-      origin: clientOrigins,
-      credentials: true,
-    })
-  );
+  app.use(cors(corsOptions));
+  app.options("*", cors(corsOptions));
   app.use(express.json());
   app.use(cookieParser());
   app.use(httpLogger);
