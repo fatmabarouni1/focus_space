@@ -53,8 +53,9 @@ services:
       - key: BREVO_SMTP_FROM
         value: StudyPal <you@example.com>
 
-  - type: static
+  - type: web
     name: studypal-frontend
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
