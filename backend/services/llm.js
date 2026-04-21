@@ -10,7 +10,14 @@ const GROQ_MODEL = config.llm.groqModel;
 const EMBEDDING_MODEL = config.llm.embeddingModel;
 
 const groqClient = provider === "groq" ? new Groq({ apiKey: GROQ_API_KEY }) : null;
-const embeddingPipelinePromise = pipeline("feature-extraction", EMBEDDING_MODEL);
+let embeddingPipelinePromise = null;
+
+const getEmbeddingPipeline = () => {
+  if (!embeddingPipelinePromise) {
+    embeddingPipelinePromise = pipeline("feature-extraction", EMBEDDING_MODEL);
+  }
+  return embeddingPipelinePromise;
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -88,7 +95,7 @@ const generateText = async (prompt, systemPrompt = "") =>
   );
 
 const generateEmbedding = async (text) => {
-  const extractor = await embeddingPipelinePromise;
+  const extractor = await getEmbeddingPipeline();
   const output = await extractor(text, {
     pooling: "mean",
     normalize: true,
