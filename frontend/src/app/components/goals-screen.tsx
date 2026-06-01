@@ -14,6 +14,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -482,6 +483,9 @@ export function GoalsScreen({ authToken, onBack }: GoalsScreenProps) {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Create Custom Goal</DialogTitle>
+                  <DialogDescription>
+                    Define a measurable goal, its unit, and an optional deadline.
+                  </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={addCustomGoal} className="space-y-4">
                   <div className="space-y-2">

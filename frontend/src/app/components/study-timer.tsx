@@ -6,6 +6,7 @@ import { cn } from '@/app/components/ui/utils';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -114,6 +115,9 @@ export function StudyTimer({ onSessionComplete, onFullscreen, className, embedde
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Timer Settings</DialogTitle>
+                <DialogDescription>
+                  Update the focus and break lengths used by this study timer.
+                </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSettingsSave} className="space-y-4">
                 <div className="space-y-2">

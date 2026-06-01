@@ -7,6 +7,7 @@ import { Label } from '@/app/components/ui/label';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -267,6 +268,9 @@ export function CalendarScreen({ authToken, onBack }: CalendarScreenProps) {
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>Create New Event</DialogTitle>
+                <DialogDescription>
+                  Add a study session, task, or deadline to your planner.
+                </DialogDescription>
               </DialogHeader>
               <form onSubmit={addEvent} className="space-y-4">
                 <div className="space-y-2">

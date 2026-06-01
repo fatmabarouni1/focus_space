@@ -6,6 +6,7 @@ import { CompactMusicPlayer } from '@/app/components/compact-music-player';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -178,6 +179,9 @@ export function TimerScreen({ onBack }: TimerScreenProps) {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>{t('timer.timerSettings')}</DialogTitle>
+                  <DialogDescription>
+                    Adjust the focus, break, and long-break durations for this timer.
+                  </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSettingsSave} className="space-y-4">
                   <div className="space-y-2">
