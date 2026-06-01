@@ -13,6 +13,7 @@ const ACCESS_TOKEN_TTL = config.jwt.expiresIn;
 const REFRESH_TOKEN_TTL_DAYS = config.jwt.refreshTtlDays;
 const isProduction = config.env === "production";
 const isDemoMode = String(process.env.DEMO_MODE || "").toLowerCase() === "true";
+const disableEmailVerification = config.auth.disableEmailVerification;
 const allowLocalOtpLog =
   !isProduction &&
   (process.env.ALLOW_LOCAL_OTP_LOG || "").toLowerCase() === "true";
@@ -59,6 +60,19 @@ const buildOtpQuery = ({ purpose, method, email, phone }) => ({
 const buildSecureOtpResponse = (message = "Verification code sent successfully") => ({
   success: true,
   message,
+});
+
+const buildAuthSuccessResponse = ({ message, accessToken, user }) => ({
+  message,
+  accessToken,
+  token: accessToken,
+  user: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    created_at: user.created_at,
+  },
 });
 
 const debugOtp = (message, details = {}) => {
@@ -343,6 +357,7 @@ const consumeOtpChallenge = async ({ purpose, method, email, phone, otp }) => {
 const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
+    const normalizedEmail = email?.toLowerCase();
 
     if (!name || !email || !password) {
       return sendError(res, 400, "VALIDATION_ERROR", "Name, email, and password are required.");
@@ -352,7 +367,7 @@ const register = async (req, res) => {
       return sendError(res, 400, "VALIDATION_ERROR", "Password does not meet complexity requirements.");
     }
 
-    if (!hasSmtpConfig()) {
+    if (!disableEmailVerification && !hasSmtpConfig()) {
       return sendError(
         res,
         503,
@@ -361,20 +376,44 @@ const register = async (req, res) => {
       );
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return sendError(res, 409, "ACCOUNT_EXISTS", "An account with this email already exists.");
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    if (disableEmailVerification) {
+      // Temporary deployment fallback: create verified accounts immediately when
+      // SMTP-backed email verification is intentionally disabled.
+      const user = await User.create({
+        name,
+        email: normalizedEmail,
+        password: passwordHash,
+        phone: null,
+        emailVerified: true,
+        verificationMethod: "email",
+      });
+      const accessToken = await issueAuthTokens(res, user);
+      logAuthEvent(req, "login_success", user._id.toString(), {
+        source: "register_no_verification",
+      });
+      return res.status(201).json(
+        buildAuthSuccessResponse({
+          message: "Registration completed without email verification.",
+          accessToken,
+          user,
+        })
+      );
+    }
+
     const otpResult = await createOrReplaceOtpChallenge({
       purpose: "register",
       method: "email",
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       phone: null,
       pendingData: {
         name,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         passwordHash,
         phone: null,
       },
@@ -396,6 +435,7 @@ const registerInitiate = async (req, res) => {
   try {
     const { name, email, password, method, phone } = req.body;
     const contact = getContactFromBody({ method, email, phone });
+    const normalizedEmail = email?.toLowerCase();
 
     if (method === "email" && !contact.email) {
       return sendError(res, 400, "VALIDATION_ERROR", "Email is required for email verification.");
@@ -406,7 +446,7 @@ const registerInitiate = async (req, res) => {
     if (!isStrongPassword(password)) {
       return sendError(res, 400, "VALIDATION_ERROR", "Password does not meet complexity requirements.");
     }
-    if (method === "email" && !hasSmtpConfig() && !isDemoMode) {
+    if (method === "email" && !disableEmailVerification && !hasSmtpConfig() && !isDemoMode) {
       return sendError(
         res,
         503,
@@ -415,19 +455,43 @@ const registerInitiate = async (req, res) => {
       );
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return sendError(res, 409, "ACCOUNT_EXISTS", "An account with this email already exists.");
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    if (disableEmailVerification && method === "email") {
+      // Temporary deployment fallback: short-circuit the OTP step for email sign-up.
+      const user = await User.create({
+        name,
+        email: normalizedEmail,
+        password: passwordHash,
+        phone: phone?.trim() || null,
+        emailVerified: true,
+        verificationMethod: method,
+      });
+      const accessToken = await issueAuthTokens(res, user);
+      logAuthEvent(req, "login_success", user._id.toString(), {
+        source: "register_initiate_no_verification",
+      });
+      return res.status(201).json({
+        ...buildAuthSuccessResponse({
+          message: "Registration completed without email verification.",
+          accessToken,
+          user,
+        }),
+        verificationBypassed: true,
+      });
+    }
+
     const otpResult = await createOrReplaceOtpChallenge({
       purpose: "register",
       method,
       ...contact,
       pendingData: {
         name,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         passwordHash,
         phone: phone?.trim() || null,
       },
@@ -460,6 +524,36 @@ const registerVerify = async (req, res) => {
     }
     if (method === "sms" && !contact.phone) {
       return sendError(res, 400, "VALIDATION_ERROR", "Phone number is required for SMS verification.");
+    }
+
+    if (disableEmailVerification && method === "email") {
+      // Temporary deployment fallback: the frontend should skip this route, but if it
+      // still calls it we return a clear success response instead of requiring OTP.
+      const user = await User.findOne({ email: contact.email });
+      if (!user) {
+        return sendError(
+          res,
+          404,
+          "ACCOUNT_NOT_FOUND",
+          "Registration already skips email verification; submit sign-up again to create the account."
+        );
+      }
+      if (user.emailVerified === false) {
+        user.emailVerified = true;
+        await user.save();
+      }
+      const accessToken = await issueAuthTokens(res, user);
+      logAuthEvent(req, "login_success", user._id.toString(), {
+        source: "register_verify_bypassed",
+      });
+      return res.status(200).json({
+        ...buildAuthSuccessResponse({
+          message: "Email verification is disabled for this deployment.",
+          accessToken,
+          user,
+        }),
+        verificationBypassed: true,
+      });
     }
 
     const result = await consumeOtpChallenge({
@@ -512,18 +606,13 @@ const registerVerify = async (req, res) => {
       source: "register_verify",
     });
 
-    return res.status(201).json({
-      message: "Registration verified successfully.",
-      accessToken,
-      token: accessToken,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        created_at: user.created_at,
-      },
-    });
+    return res.status(201).json(
+      buildAuthSuccessResponse({
+        message: "Registration verified successfully.",
+        accessToken,
+        user,
+      })
+    );
   } catch (error) {
     logger.error("registerVerify error", {
       requestId: req.requestId,
@@ -554,7 +643,11 @@ const login = async (req, res) => {
       logAuthEvent(req, "login_failed", null, { reason: "email_not_found" });
       return sendError(res, 404, "EMAIL_NOT_FOUND", "No account exists with this email.");
     }
-    if (user.verificationMethod === "email" && user.emailVerified === false) {
+    if (
+      !disableEmailVerification &&
+      user.verificationMethod === "email" &&
+      user.emailVerified === false
+    ) {
       logAuthEvent(req, "login_failed", user._id.toString(), {
         reason: "email_not_verified",
       });

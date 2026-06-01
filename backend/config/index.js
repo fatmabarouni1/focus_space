@@ -40,6 +40,12 @@ if (llmProvider === "groq" && !String(process.env.GROQ_API_KEY || "").trim()) {
 const config = {
   env,
   port: Number(process.env.PORT || 5000),
+  auth: {
+    // Temporary deployment fallback: when true, new email sign-ups skip OTP delivery
+    // and accounts are created in a verified state so the app can run without SMTP.
+    disableEmailVerification:
+      String(process.env.DISABLE_EMAIL_VERIFICATION || "").toLowerCase() === "true",
+  },
   app: {
     clientOrigins: (process.env.CLIENT_ORIGIN || "http://localhost:5173")
       .split(",")

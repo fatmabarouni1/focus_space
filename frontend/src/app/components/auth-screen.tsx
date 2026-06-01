@@ -53,17 +53,16 @@ const evaluatePasswordRules = (password: string, confirmPassword: string) => ({
 });
 
 const fieldClassName =
-  "h-11 rounded-2xl border-border/70 bg-background shadow-none transition-colors focus-visible:ring-[3px] focus-visible:ring-[var(--focus-light)]";
+  "h-11 rounded-xl border border-slate-200 bg-white text-sm shadow-none transition-[border-color,box-shadow] duration-200 placeholder:text-slate-400 focus-visible:border-[var(--focus-primary)] focus-visible:ring-4 focus-visible:ring-[rgba(91,124,153,0.12)]";
 const fieldWithLeadingIconClassName = `${fieldClassName} pl-10`;
 const fieldWithTwoIconsClassName = `${fieldClassName} pl-10 pr-10`;
 const primaryButtonClassName =
-  "h-11 w-full rounded-2xl border-0 bg-[var(--focus-primary)] text-white shadow-[0_10px_30px_rgba(91,124,153,0.28)] hover:opacity-95";
-const tabButtonClassName =
-  "rounded-xl px-3 py-2 text-sm font-medium transition";
-
+  "h-11 w-full rounded-xl border border-transparent bg-[var(--focus-primary)] text-sm font-semibold text-white shadow-[0_8px_20px_rgba(91,124,153,0.22)] transition-all duration-200 hover:translate-y-[-1px] hover:shadow-[0_12px_24px_rgba(91,124,153,0.24)]";
 export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   const { t } = useTranslation();
   const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+  const disableEmailVerification =
+    String(import.meta.env.VITE_DISABLE_EMAIL_VERIFICATION ?? "").toLowerCase() === "true";
   const buildApiUrl = (path: string) => (apiBaseUrl ? `${apiBaseUrl}${path}` : path);
 
   const [activeTab, setActiveTab] = useState<AuthTab>("login");
@@ -145,7 +144,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   const registerCanSubmit =
     registerName.trim().length > 0 &&
     registerEmail.trim().length > 0 &&
-    (registerMethod === "email" || registerPhone.trim().length > 0) &&
+    (disableEmailVerification || registerMethod === "email" || registerPhone.trim().length > 0) &&
     allRegisterRulesMet;
   const resetCanSubmit =
     ((resetMethod === "email" && resetEmail.trim().length > 0) ||
@@ -161,6 +160,11 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   const clearFeedback = () => {
     setError("");
     setSuccess("");
+  };
+
+  const switchAuthTab = (tab: AuthTab) => {
+    setActiveTab(tab);
+    clearFeedback();
   };
 
   const postJson = async (path: string, payload: Record<string, unknown>) => {
@@ -226,10 +230,26 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
       const data = await postJson("/api/auth/register/initiate", {
         name: registerName.trim(),
         email: registerEmail.trim(),
-        phone: registerPhone.trim() || undefined,
+        phone: disableEmailVerification ? undefined : registerPhone.trim() || undefined,
         password: registerPassword,
-        method: registerMethod,
+        method: disableEmailVerification ? "email" : registerMethod,
       });
+      const token = data.token || data.accessToken;
+      if (token) {
+        // Temporary deployment fallback: when backend verification is disabled,
+        // registration completes immediately and the OTP step should be skipped.
+        const authenticatedUser = {
+          name: data.user?.name ?? registerName,
+          email: data.user?.email ?? registerEmail,
+          token,
+          role: data.user?.role ?? "user",
+        };
+        setSuccess(
+          typeof data?.message === "string" ? data.message : t("auth.messages.accountVerified")
+        );
+        setTimeout(() => onAuthenticated(authenticatedUser), 700);
+        return;
+      }
       setRegisterStep("otp");
       setRegisterOtp("");
       setRegisterAttemptsLeft(OTP_MAX_ATTEMPTS);
@@ -378,7 +398,9 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   const headingText = activeTab === "register" ? t("auth.registerTitle") : activeTab === "reset" ? t("auth.resetTitle") : t("auth.loginTitle");
   const subtitleText =
     activeTab === "register"
-      ? t("auth.registerSubtitle")
+      ? disableEmailVerification
+        ? "Create your account and start immediately without a verification step."
+        : t("auth.registerSubtitle")
       : activeTab === "reset"
         ? t("auth.resetSubtitle")
         : t("auth.loginSubtitle");
@@ -477,7 +499,7 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
   );
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-6 sm:px-6 sm:py-8">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-5 sm:px-6 sm:py-6">
       <div
         className="absolute inset-0 opacity-80"
         style={{
@@ -485,76 +507,54 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
             "radial-gradient(circle at 20% 20%, var(--focus-primary) 0%, transparent 45%), radial-gradient(circle at 80% 80%, var(--break-primary) 0%, transparent 40%), linear-gradient(180deg, #f9fbfd 0%, #f4f7fb 100%)",
         }}
       />
-      <div className="relative z-10 w-full max-w-lg">
+      <div className="relative z-10 w-full max-w-[460px]">
         <button
           onClick={onBack}
-          className="mx-auto mb-4 flex items-center gap-3 rounded-full border border-white/80 bg-white/90 px-4 py-2 text-sm font-medium text-foreground shadow-sm backdrop-blur hover:bg-white"
+          className="mx-auto mb-3 flex items-center gap-3 rounded-full border border-white/80 bg-white/90 px-3.5 py-2 text-sm font-medium text-foreground shadow-sm backdrop-blur transition-colors hover:bg-white"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl" style={{ backgroundColor: "var(--focus-light)", color: "var(--focus-primary)" }}>
-            <BookOpen className="h-5 w-5" />
+          <span className="flex h-9 w-9 items-center justify-center rounded-2xl" style={{ backgroundColor: "var(--focus-light)", color: "var(--focus-primary)" }}>
+            <BookOpen className="h-4 w-4" />
           </span>
-          <span className="text-base font-semibold tracking-tight text-foreground">{t("app.brand")}</span>
+          <span className="text-[15px] font-semibold tracking-tight text-foreground">{t("app.brand")}</span>
         </button>
 
-        <Card className="overflow-hidden rounded-[28px] border border-white/80 bg-white/95 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
-          <div className="space-y-5">
-            <div className="space-y-4">
-              <div className="space-y-2 text-center">
-                <h1 className="text-[28px] font-semibold tracking-tight text-foreground">{headingText}</h1>
-                <p className="mx-auto max-w-sm text-sm leading-6 text-muted-foreground">{subtitleText}</p>
-              </div>
-              <div className="grid grid-cols-3 gap-2 rounded-2xl p-1.5" style={{ backgroundColor: "var(--focus-light)" }}>
-                {(["login", "register", "reset"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    type="button"
-                    className={`${tabButtonClassName} ${activeTab === tab ? "bg-white shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                    style={activeTab === tab ? { color: "var(--focus-primary)" } : undefined}
-                    onClick={() => {
-                      setActiveTab(tab);
-                      clearFeedback();
-                    }}
-                  >
-                    {tab === "login" ? t("auth.tabs.login") : tab === "register" ? t("auth.tabs.register") : t("auth.tabs.reset")}
-                  </button>
-                ))}
-              </div>
-              {activeTab !== "reset" && (
-                <div className="text-center text-sm text-muted-foreground">
-                  <button
-                    type="button"
-                    className="font-medium underline-offset-4 hover:underline"
-                    style={{ color: "var(--focus-primary)" }}
-                    onClick={() => {
-                      setActiveTab(activeTab === "login" ? "reset" : "login");
-                      clearFeedback();
-                    }}
-                  >
-                    {activeTab === "login" ? t("auth.forgotPassword") : t("auth.backToSignIn")}
-                  </button>
+        <Card className="overflow-hidden rounded-[24px] border border-white/80 bg-white/95 p-5 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur sm:p-6">
+          <div className="space-y-4">
+              <div className="space-y-3">
+                <div className="space-y-1.5 text-center">
+                  <h1 className="text-[24px] font-semibold tracking-tight text-slate-900">{headingText}</h1>
+                  <p className="mx-auto max-w-xs text-sm leading-5 text-slate-500">{subtitleText}</p>
                 </div>
-              )}
             </div>
 
             {renderAlert()}
 
             {activeTab === "login" && (
               <form onSubmit={handleLogin} className="space-y-4">
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div className="space-y-1.5">
-                    <Label htmlFor="login-email" className="text-sm font-medium text-slate-700">{t("auth.email")}</Label>
+                    <Label htmlFor="login-email" className="text-[13px] font-medium text-slate-700">{t("auth.email")}</Label>
                     <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Mail className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                       <Input id="login-email" type="email" placeholder={t("auth.emailPlaceholder")} value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="login-password" className="text-sm font-medium text-slate-700">{t("auth.password")}</Label>
+                    <Label htmlFor="login-password" className="text-[13px] font-medium text-slate-700">{t("auth.password")}</Label>
                     <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Lock className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
                       <Input id="login-password" type={showLoginPassword ? "text" : "password"} placeholder={t("auth.passwordPlaceholder")} value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} required disabled={loading} className={fieldWithTwoIconsClassName} />
-                      <button type="button" aria-label={showLoginPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" onClick={() => setShowLoginPassword((prev) => !prev)}>
-                        {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      <button type="button" aria-label={showLoginPassword ? t("auth.hidePassword") : t("auth.showPassword")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700" onClick={() => setShowLoginPassword((prev) => !prev)}>
+                        {showLoginPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                    <div className="flex justify-end pt-0.5">
+                      <button
+                        type="button"
+                        className="text-[13px] text-slate-500 transition-colors hover:text-[var(--focus-primary)]"
+                        onClick={() => switchAuthTab("reset")}
+                      >
+                        {t("auth.forgotPassword")}
                       </button>
                     </div>
                   </div>
@@ -563,6 +563,15 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                   {loading ? t("auth.signingIn") : t("auth.signInButton")}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
+                <div className="space-y-2 pt-1 text-center">
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center text-sm text-slate-600 transition-colors hover:text-[var(--focus-primary)]"
+                    onClick={() => switchAuthTab("register")}
+                  >
+                    Don&apos;t have an account? <span className="ml-1 font-medium text-[var(--focus-primary)]">Sign up</span>
+                  </button>
+                </div>
               </form>
             )}
 
@@ -583,16 +592,18 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                       <Input id="register-email" type="email" placeholder={t("auth.emailPlaceholder")} value={registerEmail} onChange={(e) => setRegisterEmail(e.target.value)} required disabled={loading} className={fieldWithLeadingIconClassName} />
                     </div>
                   </div>
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="register-phone" className="text-sm font-medium text-slate-700">{t("auth.phone")}</Label>
-                      <span className="text-xs text-slate-400">{t("auth.messages.smsPhoneHint")}</span>
+                  {!disableEmailVerification && (
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="register-phone" className="text-sm font-medium text-slate-700">{t("auth.phone")}</Label>
+                        <span className="text-xs text-slate-400">{t("auth.messages.smsPhoneHint")}</span>
+                      </div>
+                      <div className="relative">
+                        <Smartphone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input id="register-phone" type="tel" placeholder={t("auth.phonePlaceholder")} value={registerPhone} onChange={(e) => setRegisterPhone(e.target.value)} disabled={loading} className={fieldWithLeadingIconClassName} />
+                      </div>
                     </div>
-                    <div className="relative">
-                      <Smartphone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input id="register-phone" type="tel" placeholder={t("auth.phonePlaceholder")} value={registerPhone} onChange={(e) => setRegisterPhone(e.target.value)} disabled={loading} className={fieldWithLeadingIconClassName} />
-                    </div>
-                  </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label htmlFor="register-password" className="text-sm font-medium text-slate-700">{t("auth.password")}</Label>
                     <div className="relative">
@@ -615,17 +626,28 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                   </div>
                 </div>
                 {renderPasswordRules(registerRules)}
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-medium text-slate-700">{t("auth.verificationMethod")}</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button type="button" variant="outline" className={registerMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setRegisterMethod("email")} disabled={loading}>{t("auth.emailMethod")}</Button>
-                    <Button type="button" variant="outline" className={registerMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setRegisterMethod("sms")} disabled={loading}>{t("auth.smsMethod")}</Button>
+                {!disableEmailVerification && (
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium text-slate-700">{t("auth.verificationMethod")}</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button type="button" variant="outline" className={registerMethod === "email" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "email" ? { backgroundColor: "var(--focus-primary)" } : undefined} onClick={() => setRegisterMethod("email")} disabled={loading}>{t("auth.emailMethod")}</Button>
+                      <Button type="button" variant="outline" className={registerMethod === "sms" ? "h-10 rounded-2xl border-transparent text-white hover:opacity-95" : "h-10 rounded-2xl border-border/70 bg-white text-muted-foreground hover:bg-background hover:text-foreground"} style={registerMethod === "sms" ? { backgroundColor: "var(--break-primary)" } : undefined} onClick={() => setRegisterMethod("sms")} disabled={loading}>{t("auth.smsMethod")}</Button>
+                    </div>
                   </div>
-                </div>
+                )}
                 <Button type="submit" className={primaryButtonClassName} disabled={loading || !registerCanSubmit}>
                   {loading ? t("auth.submitting") : t("auth.createAccountButton")}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-slate-600 transition-colors hover:text-[var(--focus-primary)]"
+                    onClick={() => switchAuthTab("login")}
+                  >
+                    Already have an account? <span className="text-[var(--focus-primary)]">Sign in</span>
+                  </button>
+                </div>
               </form>
             )}
 
@@ -695,6 +717,15 @@ export function AuthScreen({ onAuthenticated, onBack }: AuthScreenProps) {
                 <Button type="submit" className={primaryButtonClassName} disabled={loading || !resetCanSubmit}>
                   {loading ? t("auth.submitting") : t("auth.sendCodeButton")}
                 </Button>
+                <div className="pt-1 text-center">
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-slate-600 transition-colors hover:text-[var(--focus-primary)]"
+                    onClick={() => switchAuthTab("login")}
+                  >
+                    {t("auth.backToSignIn")}
+                  </button>
+                </div>
               </form>
             )}
 

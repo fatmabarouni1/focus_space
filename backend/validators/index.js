@@ -1,4 +1,5 @@
 import { z } from "zod";
+import config from "../config/index.js";
 
 const objectId = z
   .string()
@@ -13,6 +14,7 @@ const password = z
   .regex(/[0-9]/, "Password must contain at least one number.")
   .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character.");
 const role = z.enum(["user", "admin"]);
+const disableEmailVerification = config.auth.disableEmailVerification;
 
 const paginationQuery = z.object({
   page: z.coerce.number().int().min(1).optional(),
@@ -44,7 +46,8 @@ const authSchemas = {
     otp: z.string().regex(/^\d{6}$/).optional(),
     code: z.string().regex(/^\d{6}$/).optional(),
   }).superRefine((data, ctx) => {
-    if (!data.otp && !data.code) {
+    const verificationBypassed = disableEmailVerification && data.method === "email";
+    if (!verificationBypassed && !data.otp && !data.code) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["otp"],
