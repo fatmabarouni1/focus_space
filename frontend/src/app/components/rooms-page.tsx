@@ -4,6 +4,7 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import {
   createRoom,
+  dedupeRooms,
   fetchRooms,
   type RoomListItem,
   type RoomStatus,
@@ -41,7 +42,7 @@ export function RoomsPage({ authToken, onJoinRoom }: RoomsPageProps) {
     setError('');
     try {
       const data = await fetchRooms(authToken);
-      setRooms(data);
+      setRooms(dedupeRooms(data));
     } catch (err: any) {
       setError(err.message || 'Failed to load rooms.');
     } finally {
@@ -70,8 +71,9 @@ export function RoomsPage({ authToken, onJoinRoom }: RoomsPageProps) {
     setCreateError('');
     try {
       const result = await createRoom(authToken, title.trim());
-      setRooms((prev) => [result.room, ...prev]);
+      setRooms((prev) => dedupeRooms([result.room, ...prev]));
       setIsCreateOpen(false);
+      await loadRooms();
     } catch (err: any) {
       setCreateError(err.message || 'Failed to create room.');
     } finally {

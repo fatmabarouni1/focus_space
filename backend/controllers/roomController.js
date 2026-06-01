@@ -2,6 +2,7 @@ import Room from "../models/Room.js";
 import RoomParticipant from "../models/RoomParticipant.js";
 import User from "../models/User.js";
 import { sendError } from "../utils/errors.js";
+import logger from "../utils/logger.js";
 import { createPaginationEnvelope } from "../utils/paginate.js";
 
 const sanitizeTitle = (value) =>
@@ -53,6 +54,14 @@ const createRoom = async (req, res) => {
 
   const host = await User.findById(req.user.id);
 
+  logger.info("Room created", {
+    roomId: room._id.toString(),
+    title: room.title,
+    hostUserId: req.user.id,
+    hostName: host?.name ?? "Unknown",
+    requestId: req.requestId,
+  });
+
   return res.status(201).json({
     message: "Room created.",
     room: toRoomSummary(room, host),
@@ -62,44 +71,42 @@ const createRoom = async (req, res) => {
 const listRooms = async (req, res) => {
   const limit = req.pagination?.limit ?? 20;
   const cursor = req.pagination?.cursor;
-  const membershipFilter = { user_id: req.user.id };
+  const roomFilter = { is_active: true };
 
   if (cursor) {
-    membershipFilter._id = { $lt: cursor };
+    roomFilter._id = { $lt: cursor };
   }
 
-  const memberships = await RoomParticipant.find(membershipFilter)
+  logger.info("Room list fetch requested", {
+    userId: req.user.id,
+    cursor: cursor ?? null,
+    limit,
+    requestId: req.requestId,
+  });
+
+  const rooms = await Room.find(roomFilter)
     .sort({ _id: -1 })
     .limit(limit + 1)
-    .lean();
-
-  const hasMore = memberships.length > limit;
-  const pageMemberships = hasMore ? memberships.slice(0, limit) : memberships;
-  const roomIds = pageMemberships.map((membership) => membership.room_id);
-
-  const rooms = await Room.find({
-    _id: { $in: roomIds },
-    is_active: true,
-  })
     .populate("host_user_id", "name")
     .lean();
 
-  const roomById = new Map(
-    rooms.map((room) => [String(room._id), room])
-  );
+  const hasMore = rooms.length > limit;
+  const pageRooms = hasMore ? rooms.slice(0, limit) : rooms;
+  const data = pageRooms.map((room) => toRoomSummary(room, room.host_user_id));
+  const total = await Room.countDocuments({ is_active: true });
 
-  const data = pageMemberships
-    .map((membership) => roomById.get(String(membership.room_id)))
-    .filter(Boolean)
-    .map((room) => toRoomSummary(room, room.host_user_id));
-
-  const total = await RoomParticipant.countDocuments({ user_id: req.user.id });
+  logger.info("Room list fetch completed", {
+    userId: req.user.id,
+    returnedRooms: data.length,
+    totalActiveRooms: total,
+    requestId: req.requestId,
+  });
 
   return res.json(
     createPaginationEnvelope(data, {
       hasMore,
       nextCursor: hasMore
-        ? String(pageMemberships[pageMemberships.length - 1]?._id ?? "")
+        ? String(pageRooms[pageRooms.length - 1]?._id ?? "")
         : null,
       total,
       limit,

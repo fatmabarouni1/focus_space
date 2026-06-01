@@ -29,6 +29,14 @@ export interface RoomParticipant {
   joinedAt: string;
 }
 
+export const dedupeRooms = (rooms: RoomListItem[]) => {
+  const roomMap = new Map<string, RoomListItem>();
+  for (const room of rooms) {
+    roomMap.set(room._id, room);
+  }
+  return Array.from(roomMap.values());
+};
+
 export async function fetchRooms(token: string) {
   const response = await fetch(buildApiUrl("/api/rooms"), {
     headers: {
@@ -42,7 +50,7 @@ export async function fetchRooms(token: string) {
   }
 
   const data = await response.json();
-  return (data.data ?? data.rooms ?? []) as RoomListItem[];
+  return dedupeRooms((data.data ?? data.rooms ?? []) as RoomListItem[]);
 }
 
 export async function fetchRoom(token: string, roomId: string) {

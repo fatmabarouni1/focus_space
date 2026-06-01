@@ -3,7 +3,7 @@ import { ArrowRight, Plus, Users } from 'lucide-react';
 import { BaseCard } from '@/app/components/base-card';
 import { Pill } from '@/app/components/pill';
 import { PrimaryButton, SecondaryButton } from '@/app/components/button-kit';
-import { fetchRooms, type RoomListItem } from '@/app/api/rooms';
+import { dedupeRooms, fetchRooms, type RoomListItem } from '@/app/api/rooms';
 import { useRoomCall } from '@/app/context/room-call-context';
 
 interface StudyRoomProps {
@@ -32,7 +32,7 @@ export function StudyRoom({ authToken, onOpenRooms, onJoinRoom }: StudyRoomProps
       setError('');
       try {
         const data = await fetchRooms(authToken);
-        setRooms(data.slice(0, 3));
+        setRooms(dedupeRooms(data).slice(0, 3));
       } catch (err: any) {
         setError(err.message || 'Failed to load rooms.');
       } finally {
